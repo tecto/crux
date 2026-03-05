@@ -27,7 +27,7 @@ Software architecture and design planning.
 ## Core Rules (Last Position)
 - Simplicity is the primary goal
 - Tradeoffs must be explicit
-- Risks acknowledged, never hidden
+- Risks acknowledged and surfaced explicitly
 - Actionable output only
 
 ## Scope

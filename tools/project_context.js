@@ -1,20 +1,34 @@
-import { z } from 'zod';
+import { tool } from '../lib/plugin-shim.js';
+import fs from 'fs/promises';
+import path from 'path';
 
-const ProjectContextSchema = z.object({
-  include: z.array(z.string()).optional().describe('Sections to include'),
-});
-
-export const tool = {
-  name: 'project_context',
+export default tool({
   description: 'Read and return PROJECT.md context',
-  schema: ProjectContextSchema,
-  async execute(params) {
-    // TODO: Implement project context retrieval
-    // - Find PROJECT.md in current or parent directories
-    // - Parse metadata
-    // - Filter sections if requested
-    // - Return structured project context
-    // - Handle missing PROJECT.md gracefully
-    throw new Error('Not yet implemented');
+  args: {
+    include: tool.schema.array(tool.schema.string()).optional().describe('Sections to include'),
   },
-};
+  async execute(args) {
+    const projectFile = path.join(process.cwd(), '.crux', 'context', 'PROJECT.md');
+
+    let content;
+    try {
+      content = await fs.readFile(projectFile, 'utf8');
+    } catch {
+      return {
+        instruction: 'PROJECT.md not found. Run update-project-context to generate it.',
+      };
+    }
+
+    if (args.include && args.include.length > 0) {
+      const sections = content.split(/^## /m);
+      const filtered = sections.filter((section, i) => {
+        if (i === 0) return true;
+        const sectionName = section.split('\n')[0].trim();
+        return args.include.some(inc => sectionName.includes(inc));
+      });
+      content = filtered.join('## ');
+    }
+
+    return { content };
+  },
+});

@@ -1,22 +1,12 @@
 {
-  "models": {
-    "primary": {
-      "provider": "ollama",
-      "model": "crux-think",
-      "endpoint": "http://localhost:11434"
-    },
-    "small": {
-      "provider": "ollama",
-      "model": "qwen3:8b",
-      "endpoint": "http://localhost:11434"
-    },
-    "available": [
-      {
-        "provider": "ollama",
-        "model": "crux-chat",
+  "model": "ollama/crux-think",
+  "small_model": "ollama/qwen3:8b",
+  "provider": {
+    "ollama": {
+      "options": {
         "endpoint": "http://localhost:11434"
       }
-    ]
+    }
   },
   "lsp": {
     "python": {
@@ -29,11 +19,11 @@
     }
   },
   "timeout": 600000,
-  "permissions": {
+  "permission": {
     "edit": "ask",
     "bash": "ask"
   },
-  "pluginPath": "~/.config/opencode/plugins/",
-  "commandPath": "~/.config/opencode/commands/",
-  "toolPath": "~/.config/opencode/tools/"
+  "compaction": {
+    "enabled": true
+  }
 }
