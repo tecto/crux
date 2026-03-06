@@ -73,7 +73,7 @@ describe('session-logger.js full coverage', () => {
     assert.ok(types.includes('session.start'));
     assert.ok(types.includes('chat.message'));
     assert.ok(types.includes('tool.execute'));
-    assert.ok(types.includes('session.context'));
+    assert.ok(types.includes('session.compaction'));
     assert.ok(types.includes('session.end'));
 
     const chatEntry = lines.find(l => l.type === 'chat.message');
@@ -369,6 +369,35 @@ describe('session-logger.js checkpoint and recovery', () => {
 
     await plugin.hooks['session.end']();
     plugin = null;
+  });
+
+  it('compaction log entry includes instructions', async () => {
+    const mod = await import(PLUGINS_DIR + '/session-logger.js?complog=' + Date.now());
+    plugin = mod.default;
+    await plugin.hooks['session.start']();
+
+    plugin.hooks['experimental.session.compacting']({
+      mode: 'debug',
+      script: 'fix.sh',
+      project: 'myapp',
+    });
+
+    await plugin.hooks['session.end']();
+    plugin = null;
+
+    const sessionsDir = path.join(tempDir, '.crux/analytics/sessions');
+    const today = new Date().toISOString().split('T')[0];
+    const dateDir = path.join(sessionsDir, today);
+    const files = await fs.readdir(dateDir);
+    const content = await fs.readFile(path.join(dateDir, files[0]), 'utf8');
+    const entries = content.trim().split('\n').map(l => JSON.parse(l));
+
+    const compactEntry = entries.find(e => e.type === 'session.compaction');
+    assert.ok(compactEntry, 'Should have session.compaction entry');
+    assert.equal(compactEntry.mode, 'debug');
+    assert.equal(compactEntry.project, 'myapp');
+    assert.ok(compactEntry.instructions);
+    assert.ok(compactEntry.instructions.length > 0);
   });
 
   it('session.end includes interaction count', async () => {
@@ -814,6 +843,88 @@ describe('compaction-hook.js full coverage', () => {
     assert.ok(instructions.includes('Preserve error messages'));
     assert.ok(!instructions.includes('Active mode'));
     assert.ok(!instructions.includes('Active scripts'));
+  });
+
+  it('logs compaction event to analytics file', async () => {
+    const mod = await import(PLUGINS_DIR + '/compaction-hook.js?log=' + Date.now());
+    const plugin = mod.default;
+
+    await plugin.hooks['experimental.session.compacting']({
+      mode: 'debug',
+      script: 'fix.sh',
+      project: 'myapp',
+      branch: 'feature-x',
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(tempDir, '.crux/analytics/compactions', `${today}.jsonl`);
+    const content = await fs.readFile(logFile, 'utf8');
+    const entry = JSON.parse(content.trim());
+
+    assert.equal(entry.type, 'compaction');
+    assert.equal(entry.mode, 'debug');
+    assert.equal(entry.project, 'myapp');
+    assert.equal(entry.branch, 'feature-x');
+    assert.ok(entry.timestamp);
+    assert.ok(entry.instructions);
+    assert.ok(entry.instructions.includes('Active mode: debug'));
+  });
+
+  it('logs compaction with scripts and knowledge from checkpoint', async () => {
+    const sessionsDir = path.join(tempDir, '.crux/analytics/sessions');
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(path.join(sessionsDir, 'checkpoint.json'), JSON.stringify({
+      activeScripts: ['deploy.sh'],
+      recentKnowledgeLookups: [{ query: 'auth patterns', mode: 'build-py' }],
+    }));
+
+    const mod = await import(PLUGINS_DIR + '/compaction-hook.js?logfull=' + Date.now());
+    const plugin = mod.default;
+
+    await plugin.hooks['experimental.session.compacting']({ mode: 'build-py' });
+
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(tempDir, '.crux/analytics/compactions', `${today}.jsonl`);
+    const content = await fs.readFile(logFile, 'utf8');
+    const entry = JSON.parse(content.trim());
+
+    assert.deepEqual(entry.activeScripts, ['deploy.sh']);
+    assert.deepEqual(entry.knowledgeQueries, ['auth patterns']);
+    assert.ok(entry.instructions.includes('deploy.sh'));
+    assert.ok(entry.instructions.includes('auth patterns'));
+  });
+
+  it('logs compaction even when checkpoint is missing', async () => {
+    const mod = await import(PLUGINS_DIR + '/compaction-hook.js?lognocp=' + Date.now());
+    const plugin = mod.default;
+
+    await plugin.hooks['experimental.session.compacting']({ mode: 'plan' });
+
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(tempDir, '.crux/analytics/compactions', `${today}.jsonl`);
+    const content = await fs.readFile(logFile, 'utf8');
+    const entry = JSON.parse(content.trim());
+
+    assert.equal(entry.mode, 'plan');
+    assert.ok(!entry.activeScripts);
+    assert.ok(!entry.knowledgeQueries);
+  });
+
+  it('appends multiple compaction events to same log file', async () => {
+    const mod = await import(PLUGINS_DIR + '/compaction-hook.js?multi=' + Date.now());
+    const plugin = mod.default;
+
+    await plugin.hooks['experimental.session.compacting']({ mode: 'debug' });
+    await plugin.hooks['experimental.session.compacting']({ mode: 'plan' });
+
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(tempDir, '.crux/analytics/compactions', `${today}.jsonl`);
+    const content = await fs.readFile(logFile, 'utf8');
+    const entries = content.trim().split('\n').map(l => JSON.parse(l));
+
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0].mode, 'debug');
+    assert.equal(entries[1].mode, 'plan');
   });
 });
 

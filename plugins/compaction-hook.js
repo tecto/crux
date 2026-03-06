@@ -3,6 +3,38 @@ import path from 'path';
 
 const PRESERVE_FIELDS = ['mode', 'script', 'project', 'branch'];
 
+async function logCompactionEvent(context, instructions, scripts, knowledge) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const logDir = path.join(process.env.HOME, '.crux/analytics/compactions');
+    await fs.mkdir(logDir, { recursive: true });
+
+    const entry = {
+      type: 'compaction',
+      timestamp: new Date().toISOString(),
+      mode: context.mode || null,
+      project: context.project || null,
+      branch: context.branch || null,
+      instructions,
+    };
+
+    if (scripts.length > 0) {
+      entry.activeScripts = scripts;
+    }
+    if (knowledge.length > 0) {
+      entry.knowledgeQueries = knowledge.map(k => k.query);
+    }
+
+    await fs.appendFile(
+      path.join(logDir, `${today}.jsonl`),
+      JSON.stringify(entry) + '\n',
+      'utf8'
+    );
+  } catch {
+    // Don't let logging failures break compaction
+  }
+}
+
 async function loadActiveScripts() {
   try {
     const sessionsDir = path.join(process.env.HOME, '.crux/analytics/sessions');
@@ -78,6 +110,8 @@ export const CompactionHookPlugin = async (ctx) => {
       if (knowledge.length > 0) {
         output.recentKnowledge = knowledge;
       }
+
+      await logCompactionEvent(input, instrText, scripts, knowledge);
     },
   };
 };
@@ -108,6 +142,8 @@ export default {
       if (knowledge.length > 0) {
         compacted.recentKnowledge = knowledge;
       }
+
+      await logCompactionEvent(context, instructions, scripts, knowledge);
 
       return compacted;
     },

@@ -1,5 +1,5 @@
-const THINK_MODES = ['debug', 'plan', 'infra-architect', 'review', 'legal', 'strategist', 'psych'];
-const NO_THINK_MODES = ['build-py', 'build-ex', 'writer', 'analyst', 'mac', 'docker', 'explain'];
+const THINK_MODES = ['debug', 'plan', 'infra-architect', 'review', 'legal', 'strategist', 'psych', 'security', 'design-review', 'design-accessibility'];
+const NO_THINK_MODES = ['build-py', 'build-ex', 'writer', 'analyst', 'mac', 'docker', 'explain', 'test', 'design-ui', 'design-system', 'design-responsive'];
 const NEUTRAL_MODES = ['ai-infra'];
 
 function routeThinkDirective(content, mode) {

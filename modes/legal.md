@@ -1,3 +1,13 @@
+---
+temperature: 0.6
+mode: primary
+description: Legal research and analysis
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+  webfetch: deny
+---
 # Mode: legal
 
 Legal research and compliance analysis (not legal advice).

@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Infrastructure and deployment planning
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: infra-architect
 
 Infrastructure, deployment, and CI/CD architecture.

@@ -29,6 +29,9 @@ const MODE_RESTRICTIONS = {
   strategist: { maxTier: 5, writeAllowed: false },
   mac: { maxTier: 5, writeAllowed: true },
   psych: { maxTier: 5, writeAllowed: false },
+  security: { maxTier: 5, writeAllowed: false },
+  'design-review': { maxTier: 5, writeAllowed: false },
+  'design-accessibility': { maxTier: 5, writeAllowed: false },
 };
 
 // Track tier usage for analytics

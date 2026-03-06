@@ -189,11 +189,18 @@ function createPlugin() {
       },
 
       'experimental.session.compacting': async (input, output) => {
+        const instrParts = [];
+        if (input.mode) instrParts.push(`mode=${input.mode}`);
+        if (input.script) instrParts.push(`script=${input.script}`);
+        if (input.project) instrParts.push(`project=${input.project}`);
+        if (input.branch) instrParts.push(`branch=${input.branch}`);
         logger.log({
-          type: 'session.context',
+          type: 'session.compaction',
           mode: input.mode,
-          scriptName: input.script,
-          projectName: input.project,
+          project: input.project,
+          script: input.script,
+          branch: input.branch,
+          instructions: instrParts.join(', '),
           timestamp: new Date().toISOString(),
         });
       },
@@ -240,11 +247,18 @@ const hooks = {
     }
   },
   'experimental.session.compacting': (context) => {
+    const instrParts = [];
+    if (context.mode) instrParts.push(`mode=${context.mode}`);
+    if (context.script) instrParts.push(`script=${context.script}`);
+    if (context.project) instrParts.push(`project=${context.project}`);
+    if (context.branch) instrParts.push(`branch=${context.branch}`);
     pluginFactory._logger.log({
-      type: 'session.context',
+      type: 'session.compaction',
       mode: context.mode,
-      scriptName: context.script,
-      projectName: context.project,
+      project: context.project,
+      script: context.script,
+      branch: context.branch,
+      instructions: instrParts.join(', '),
       timestamp: new Date().toISOString(),
     });
   },

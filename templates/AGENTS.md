@@ -1,5 +1,9 @@
 # Crux Agent Framework
 
+## Session Startup
+
+**At the start of every new session**, call the `restore_context` MCP tool before doing anything else. This restores your active mode, what was being worked on, key decisions, pending tasks, and files touched from the previous session. Present a brief summary and confirm readiness to continue.
+
 ## Core Principles
 
 ### Scripts-First Design

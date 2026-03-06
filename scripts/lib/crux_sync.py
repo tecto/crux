@@ -18,7 +18,49 @@ from scripts.lib.crux_session import load_session, read_handoff, update_session
 
 SUPPORTED_TOOLS = ("opencode", "claude-code")
 
-# Mode metadata for Claude Code agent frontmatter
+# Permission presets for OpenCode agent frontmatter
+_PERM_FULL = {"read": "allow", "edit": "allow", "bash": "ask"}
+_PERM_READONLY = {"read": "allow", "edit": "deny", "bash": "deny"}
+_PERM_LIMITED = {"read": "allow", "edit": "deny", "bash": "deny", "webfetch": "deny"}
+
+# Base Ollama model names for each variant
+# OpenCode validates model names against the provider, so we must use real model names
+# (not custom Modelfile aliases like crux-think). Temperature is set per-agent in frontmatter.
+_MODEL_CODE = "ollama/qwen3-coder:30b"
+_MODEL_THINK = "ollama/qwen3.5:27b"
+_MODEL_CHAT = "ollama/qwen3.5:27b"
+
+# OpenCode per-agent model routing metadata
+# Maps mode names to OpenCode agent frontmatter fields (model, temperature, permission)
+OPENCODE_AGENT_META: dict[str, dict] = {
+    # Code modes — qwen3-coder:30b at temp 0.4
+    "build-py":           {"model": _MODEL_CODE, "temperature": 0.4, "description": "Python development specialist", "permission": _PERM_FULL},
+    "build-ex":           {"model": _MODEL_CODE, "temperature": 0.4, "description": "Elixir/Phoenix/Ash specialist", "permission": _PERM_FULL},
+    "docker":             {"model": _MODEL_CODE, "temperature": 0.4, "description": "Container and Linux operations", "permission": _PERM_FULL},
+    "test":               {"model": _MODEL_CODE, "temperature": 0.4, "description": "Test-first development specialist", "permission": _PERM_FULL},
+    "design-ui":          {"model": _MODEL_CODE, "temperature": 0.4, "description": "UI component implementation", "permission": _PERM_FULL},
+    "design-system":      {"model": _MODEL_CODE, "temperature": 0.4, "description": "Design system asset creation", "permission": _PERM_FULL},
+    "design-responsive":  {"model": _MODEL_CODE, "temperature": 0.4, "description": "Responsive layout implementation", "permission": _PERM_FULL},
+    # Think modes — qwen3.5:27b at temp 0.6
+    "plan":               {"model": _MODEL_THINK, "temperature": 0.6, "description": "Software architecture planning", "permission": _PERM_READONLY},
+    "infra-architect":    {"model": _MODEL_THINK, "temperature": 0.6, "description": "Infrastructure and deployment planning", "permission": _PERM_READONLY},
+    "review":             {"model": _MODEL_THINK, "temperature": 0.6, "description": "Code review specialist", "permission": _PERM_READONLY},
+    "debug":              {"model": _MODEL_THINK, "temperature": 0.6, "description": "Root cause analysis and debugging", "permission": _PERM_FULL},
+    "legal":              {"model": _MODEL_THINK, "temperature": 0.6, "description": "Legal research and analysis", "permission": _PERM_LIMITED},
+    "strategist":         {"model": _MODEL_THINK, "temperature": 0.6, "description": "First principles strategic analysis", "permission": _PERM_LIMITED},
+    "psych":              {"model": _MODEL_THINK, "temperature": 0.6, "description": "ACT/Attachment therapeutic support", "permission": _PERM_READONLY},
+    "security":           {"model": _MODEL_THINK, "temperature": 0.6, "description": "Adversarial vulnerability analysis", "permission": _PERM_READONLY},
+    "design-review":      {"model": _MODEL_THINK, "temperature": 0.6, "description": "Design quality and accessibility review", "permission": _PERM_READONLY},
+    "design-accessibility": {"model": _MODEL_THINK, "temperature": 0.6, "description": "WCAG accessibility specialist", "permission": _PERM_READONLY},
+    # Chat modes — qwen3.5:27b at temp 0.7
+    "writer":             {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Professional technical writing", "permission": _PERM_LIMITED},
+    "analyst":            {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Data analysis specialist", "permission": _PERM_FULL},
+    "explain":            {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Teaching and mentoring", "permission": _PERM_READONLY},
+    "mac":                {"model": _MODEL_CHAT, "temperature": 0.7, "description": "macOS system operations", "permission": _PERM_LIMITED},
+    "ai-infra":           {"model": _MODEL_CHAT, "temperature": 0.7, "description": "AI/LLM infrastructure management", "permission": _PERM_FULL},
+}
+
+# Claude Code agent frontmatter metadata (tool list format differs from OpenCode)
 _MODE_META = {
     "build-py": {"description": "Python development specialist", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "build-ex": {"description": "Elixir/Phoenix/Ash specialist", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
@@ -35,7 +77,35 @@ _MODE_META = {
     "ai-infra": {"description": "AI/LLM infrastructure management", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "mac": {"description": "macOS system operations", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "docker": {"description": "Container and Linux operations", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "test": {"description": "Test-first development specialist", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "security": {"description": "Adversarial vulnerability analysis", "tools": "Read, Grep, Glob", "permissionMode": "plan"},
+    "design-ui": {"description": "UI component implementation", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "design-review": {"description": "Design quality and accessibility review", "tools": "Read, Grep, Glob", "permissionMode": "plan"},
+    "design-system": {"description": "Design system asset creation", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "design-responsive": {"description": "Responsive layout implementation", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "design-accessibility": {"description": "WCAG accessibility specialist", "tools": "Read, Grep, Glob", "permissionMode": "plan"},
 }
+
+
+def strip_frontmatter(content: str) -> str:
+    """Strip YAML frontmatter from markdown content.
+
+    Frontmatter must start at the very beginning of the file with '---'
+    and end with a closing '---' line.
+    """
+    if not content.startswith("---\n"):
+        return content
+    # Find closing delimiter (skip the opening ---)
+    end_idx = content.find("\n---\n", 3)
+    if end_idx == -1:
+        # Check if it ends with ---\n (no body after)
+        if content.endswith("\n---\n") or content.endswith("\n---"):
+            end_idx = content.rfind("\n---")
+        else:
+            return content  # No closing delimiter
+    # Skip past the closing --- and any leading whitespace/newlines
+    body = content[end_idx + 4 + 1:]  # +4 for \n--- and +1 for \n after ---
+    return body.lstrip("\n")
 
 
 @dataclass
@@ -72,11 +142,13 @@ def sync_opencode(project_dir: str, home: str) -> SyncResult:
     os.makedirs(config_dir, exist_ok=True)
     items: list[str] = []
 
-    # Symlink modes
+    # Symlink modes (legacy) and agents (current OpenCode convention)
     modes_source = user_paths.modes
     if os.path.isdir(modes_source):
         _safe_symlink(modes_source, os.path.join(config_dir, "modes"))
         items.append("modes")
+        _safe_symlink(modes_source, os.path.join(config_dir, "agents"))
+        items.append("agents")
 
     # Symlink user-level knowledge
     know_source = user_paths.knowledge
@@ -84,7 +156,50 @@ def sync_opencode(project_dir: str, home: str) -> SyncResult:
         _safe_symlink(know_source, os.path.join(config_dir, "knowledge"))
         items.append("knowledge")
 
+    # Write MCP config into opencode.json
+    _write_opencode_mcp_config(config_dir, project_dir, home)
+    items.append("mcp-config")
+
     return SyncResult(success=True, tool="opencode", items_synced=items)
+
+
+def _write_opencode_mcp_config(config_dir: str, project_dir: str, home: str) -> None:
+    """Write or merge Crux MCP server config into opencode.json."""
+    import sys
+
+    config_file = os.path.join(config_dir, "opencode.json")
+
+    # Load existing config or start fresh
+    existing: dict = {}
+    if os.path.exists(config_file):
+        try:
+            with open(config_file) as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    # Build the Crux MCP entry in OpenCode format
+    python_path = sys.executable
+    # Find the crux repo root (where scripts/ lives) for PYTHONPATH
+    crux_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    crux_mcp: dict = {
+        "type": "local",
+        "command": [python_path, "-m", "scripts.lib.crux_mcp_server"],
+        "environment": {
+            "CRUX_PROJECT": project_dir,
+            "CRUX_HOME": home,
+            "PYTHONPATH": crux_repo,
+        },
+        "enabled": True,
+    }
+
+    # Merge into existing config
+    if "mcp" not in existing:
+        existing["mcp"] = {}
+    existing["mcp"]["crux"] = crux_mcp
+
+    with open(config_file, "w") as f:
+        json.dump(existing, f, indent=2)
 
 
 def sync_claude_code(project_dir: str, home: str) -> SyncResult:
@@ -101,7 +216,7 @@ def sync_claude_code(project_dir: str, home: str) -> SyncResult:
     if os.path.isdir(modes_dir):
         for mode_file in Path(modes_dir).glob("*.md"):
             mode_name = mode_file.stem
-            body = mode_file.read_text().strip()
+            body = strip_frontmatter(mode_file.read_text()).strip()
             meta = _MODE_META.get(mode_name, {"description": f"{mode_name} specialist", "tools": "Read, Grep, Glob"})
 
             frontmatter = f"---\nname: {mode_name}\ndescription: {meta['description']}\ntools: {meta['tools']}\n"

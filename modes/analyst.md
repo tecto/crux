@@ -1,3 +1,12 @@
+---
+temperature: 0.7
+mode: primary
+description: Data analysis specialist
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: analyst
 
 Data analysis with code execution and evidence.

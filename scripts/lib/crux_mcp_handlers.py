@@ -22,6 +22,35 @@ from scripts.lib.crux_session import (
     read_handoff as _read_handoff,
 )
 from scripts.lib.crux_switch import switch_tool
+from scripts.lib.crux_pipeline_config import (
+    PipelineConfig,
+    load_pipeline_config,
+    save_pipeline_config,
+    gates_for_mode,
+)
+from scripts.lib.crux_tdd_gate import (
+    start_tdd_gate,
+    record_red_phase,
+    record_green_phase,
+    check_tdd_gate_status,
+)
+from scripts.lib.crux_security_audit import (
+    SecurityFinding,
+    start_audit,
+    record_findings,
+    check_convergence,
+    get_blocking_findings,
+    resolve_finding,
+    audit_summary,
+)
+from scripts.lib.crux_design_validation import (
+    check_contrast_ratio,
+    validate_touch_targets,
+    start_validation,
+    record_validation_findings,
+    validation_summary,
+    ValidationFinding,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +357,225 @@ def handle_log_correction(
         f.write(json.dumps(entry) + "\n")
 
     return {"logged": True}
+
+
+# ---------------------------------------------------------------------------
+# Pipeline config
+# ---------------------------------------------------------------------------
+
+def handle_get_pipeline_config(project_dir: str) -> dict:
+    """Load and return the pipeline configuration."""
+    config_path = os.path.join(project_dir, ".crux", "pipeline.json")
+    cfg = load_pipeline_config(config_path)
+    return cfg.to_dict()
+
+
+def handle_get_active_gates(mode: str, risk_level: str, project_dir: str) -> dict:
+    """Get the active gates for a mode at a given risk level."""
+    config_path = os.path.join(project_dir, ".crux", "pipeline.json")
+    cfg = load_pipeline_config(config_path)
+    gates = gates_for_mode(mode, risk_level, cfg)
+    return {"mode": mode, "risk_level": risk_level, "active_gates": gates}
+
+
+# ---------------------------------------------------------------------------
+# TDD gate
+# ---------------------------------------------------------------------------
+
+def handle_start_tdd_gate(
+    mode: str,
+    feature: str,
+    components: list[str],
+    edge_cases: list[str],
+    project_dir: str,
+) -> dict:
+    """Start the TDD enforcement gate for a feature."""
+    config_path = os.path.join(project_dir, ".crux", "pipeline.json")
+    cfg = load_pipeline_config(config_path)
+    gate_file = os.path.join(project_dir, ".crux", "gates", "tdd.json")
+    os.makedirs(os.path.dirname(gate_file), exist_ok=True)
+
+    state = start_tdd_gate(
+        mode=mode,
+        enforcement_level=cfg.tdd.level,
+        feature=feature,
+        components=components,
+        edge_cases=edge_cases,
+        gate_file=gate_file,
+    )
+    return state.to_dict()
+
+
+def handle_check_tdd_status(project_dir: str) -> dict:
+    """Check the current status of the TDD gate."""
+    gate_file = os.path.join(project_dir, ".crux", "gates", "tdd.json")
+    return check_tdd_gate_status(gate_file)
+
+
+# ---------------------------------------------------------------------------
+# Security audit
+# ---------------------------------------------------------------------------
+
+def handle_start_security_audit(project_dir: str) -> dict:
+    """Start a security audit loop."""
+    config_path = os.path.join(project_dir, ".crux", "pipeline.json")
+    cfg = load_pipeline_config(config_path)
+    audit_file = os.path.join(project_dir, ".crux", "gates", "security.json")
+    os.makedirs(os.path.dirname(audit_file), exist_ok=True)
+
+    state = start_audit(
+        max_iterations=cfg.security_audit.max_iterations,
+        categories=cfg.security_audit.categories,
+        audit_file=audit_file,
+    )
+    return state.to_dict()
+
+
+def handle_security_audit_summary(project_dir: str) -> dict:
+    """Get the security audit summary."""
+    audit_file = os.path.join(project_dir, ".crux", "gates", "security.json")
+    return audit_summary(audit_file)
+
+
+# ---------------------------------------------------------------------------
+# Design validation
+# ---------------------------------------------------------------------------
+
+def handle_start_design_validation(project_dir: str) -> dict:
+    """Start the design validation gate."""
+    config_path = os.path.join(project_dir, ".crux", "pipeline.json")
+    cfg = load_pipeline_config(config_path)
+    val_file = os.path.join(project_dir, ".crux", "gates", "design.json")
+    os.makedirs(os.path.dirname(val_file), exist_ok=True)
+
+    state = start_validation(
+        wcag_level=cfg.design_validation.wcag_level,
+        check_brand=cfg.design_validation.check_brand_consistency,
+        check_handoff=cfg.design_validation.check_handoff_completeness,
+        validation_file=val_file,
+    )
+    return state.to_dict()
+
+
+def handle_design_validation_summary(project_dir: str) -> dict:
+    """Get the design validation summary."""
+    val_file = os.path.join(project_dir, ".crux", "gates", "design.json")
+    return validation_summary(val_file)
+
+
+def handle_check_contrast(foreground: str, background: str) -> dict:
+    """Check contrast ratio between two colors."""
+    result = check_contrast_ratio(foreground, background)
+    return result.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# log_interaction — full-text conversation logging for MCP clients
+# ---------------------------------------------------------------------------
+
+def handle_log_interaction(
+    role: str,
+    content: str,
+    project_dir: str,
+    metadata: dict | None = None,
+) -> dict:
+    """Log a conversation message to the conversations JSONL file.
+
+    Used by OpenCode (and other MCP clients) to log full-text messages
+    for analysis and continuous improvement.
+    """
+    if not content.strip():
+        return {"logged": False, "error": "Empty content"}
+    if role not in ("user", "assistant"):
+        return {"logged": False, "error": f"Invalid role: '{role}'. Must be 'user' or 'assistant'"}
+
+    project_paths = get_project_paths(project_dir)
+    state = load_session(str(project_paths.root))
+
+    log_dir = os.path.join(str(project_paths.root), "analytics", "conversations")
+    os.makedirs(log_dir, exist_ok=True)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    log_file = os.path.join(log_dir, f"{today}.jsonl")
+
+    entry: dict = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "role": role,
+        "content": content,
+        "mode": state.active_mode,
+        "tool": state.active_tool,
+    }
+    if metadata:
+        entry["metadata"] = metadata
+
+    with open(log_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    return {"logged": True}
+
+
+# ---------------------------------------------------------------------------
+# restore_context — rebuild full session context after restart
+# ---------------------------------------------------------------------------
+
+def handle_restore_context(project_dir: str, home: str) -> dict:
+    """Rebuild full session context for injection after a restart.
+
+    Returns a formatted context string containing:
+    - Active mode and its prompt
+    - Working on description
+    - Key decisions
+    - Pending tasks
+    - Files touched
+    - Handoff context
+    - Context summary
+    """
+    project_paths = get_project_paths(project_dir)
+    user_paths = get_user_paths(home)
+    state = load_session(str(project_paths.root))
+    handoff = _read_handoff(str(project_paths.root))
+
+    parts: list[str] = []
+
+    # Mode prompt
+    mode_file = os.path.join(user_paths.modes, f"{state.active_mode}.md")
+    if os.path.exists(mode_file):
+        prompt = Path(mode_file).read_text().strip()
+        parts.append(f"## Active Mode: {state.active_mode}\n{prompt}")
+    else:
+        parts.append(f"## Active Mode: {state.active_mode}")
+
+    # Session state
+    parts.append(f"\n## Session State")
+    parts.append(f"- Mode: {state.active_mode}")
+    parts.append(f"- Tool: {state.active_tool or 'not set'}")
+    if state.working_on:
+        parts.append(f"- Working on: {state.working_on}")
+
+    # Context summary
+    if state.context_summary:
+        parts.append(f"\n## Context Summary\n{state.context_summary}")
+
+    # Key decisions
+    if state.key_decisions:
+        parts.append(f"\n## Key Decisions ({len(state.key_decisions)} total)")
+        for d in state.key_decisions:
+            parts.append(f"- {d}")
+
+    # Pending tasks
+    if state.pending:
+        parts.append(f"\n## Pending Tasks")
+        for task in state.pending:
+            parts.append(f"- {task}")
+
+    # Files touched
+    if state.files_touched:
+        parts.append(f"\n## Files Touched ({len(state.files_touched)} files)")
+        for f in state.files_touched:
+            parts.append(f"- {f}")
+
+    # Handoff
+    if handoff:
+        parts.append(f"\n## Handoff Context\n{handoff}")
+
+    return {"context": "\n".join(parts)}

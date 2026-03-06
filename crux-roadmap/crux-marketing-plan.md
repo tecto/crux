@@ -106,55 +106,160 @@ The infrastructure approach: Your work generates content automatically. Your bui
 
 And here's the kicker: because `.crux/` tracks your sessions, corrections, and knowledge across tools, the marketing command can pull from a richer source than just git. It knows what modes you used, what corrections the AI made, what knowledge entries were generated. That's content that no other tool can auto-generate — because no other tool has a cross-tool intelligence layer to pull from.
 
-**The Daily Flow**
+**The Continuous Flow (Event-Driven, Typefully-Integrated)**
+
+You don't work 9-5. You work around the clock. The marketing system matches your rhythm: continuous, event-driven, rate-limited. No "end of session" — there is no end of session. You sleep, you wake up, you continue. Crux watches what you're shipping and generates posts as material accumulates.
+
+**Target cadence: ~1 post per hour while you're working. Never more than 1 per 15 minutes.**
 
 ```
-9 AM: You open Claude Code, start building Crux
-     → Fix bug in tokenizer
-     → Implement new safety check
-     → Refactor inference engine
-     → Commit messages: descriptive
+You're building. Crux is watching.
 
-5 PM: End of work session
-     → You type: /crux marketing (or Claude Code slash command)
-     → Claude reads today's git log, diffs, commit messages
-     → Generates 3-5 social posts (X threads, Reddit posts, Dev.to pitches)
-     → Posts go to `/marketing/drafts/` folder
-     → You spend 10-15 minutes reviewing, editing, personalizing
-     → Hit "schedule" in Typefully
-     → Posts go out over the next 48 hours
+     → Every 3-5 commits, Crux checks: enough material for a post?
+     → Every ~50K tokens or ~30 tool calls, Crux surfaces a draft
+     → When a high-signal event fires (tests pass after failure,
+       new MCP tool created, git tag, PR merge), Crux auto-drafts
+     → You can always type `crux marketing` manually
 
-Repeat tomorrow.
+     When a draft is ready:
+     → Crux presents it inline in your terminal (2-3 sentences max)
+     → [a]pprove  [e]dit  [s]kip  — one keystroke, back to work
+     → Approved post queues to Typefully API
+     → Cooldown gate: minimum 15 min between queued posts
+     → Posts drip out ~1/hour while you're shipping
+
+     You never stop building. Posts happen alongside your work.
 ```
+
+**Trigger System (all event-driven, no clock-based triggers):**
+
+1. **Commit threshold**: Every N commits (default: 3-5), Crux evaluates if there's a postable story. Configurable per project.
+
+2. **Token/interaction threshold**: After ~50K tokens of conversation or ~30 substantive interactions (tool calls, code edits — not just chat), Crux surfaces: "Enough material for a post. Want to review?"
+
+3. **High-signal event detection**: Crux watches for events that are inherently interesting:
+   - Test suite goes green after being red
+   - New file created matching patterns (new MCP tool, new mode, new test file)
+   - Git tag created (release)
+   - PR merged
+   - Error fixed after multiple attempts (great debugging story)
+   - `crux adopt` or `crux switch` executed (tool-switching content)
+   - New knowledge entry promoted (architecture story)
+   - New correction pattern detected (learning story)
+
+4. **Manual**: `crux marketing` anytime you feel like something's worth posting.
+
+5. **Cooldown gate (hard floor)**: No matter what triggers, minimum 15 minutes between queued posts. Crux tracks `last_queued_at` in `.crux/marketing/state.json` and enforces the floor. Target is ~1/hour, but if you're shipping fast, 1 per 15-20 min is fine.
+
+6. **Quiet hours (optional)**: If you want to pause posting while you sleep, set `quiet_hours` in config. Posts generated during quiet hours queue for the next active window. Or don't — round-the-clock posting is fine for #buildinpublic.
+
+**The Critical Insight:** You review every post before it queues. The approve step is mandatory. But it's ONE KEYSTROKE — `a` to approve, `s` to skip — and you're back to building. No context switch. No web app. The draft appears inline, you decide in 5 seconds, it queues automatically.
 
 **Implementation Details**
 
-You need a `/crux marketing` command that:
+The `crux marketing` system (MCP tool + mode + event hooks):
 
-1. Reads `git log --oneline` for the last N days
-2. Extracts key information: bugs fixed, features shipped, refactors, performance improvements
-3. Reads commit messages and code diffs for context
-4. Generates multiple post formats:
-   - Single X tweets (280 chars, punchy)
-   - X threads (5-8 tweets, narrative arc)
-   - Reddit posts (long-form, technical, with links but not spammy)
-   - Blog post outlines (Dev.to/Hashnode ready)
-   - Changelog entries
-5. Suggests hashtags, optimal posting times, platform-specific formatting
-6. Outputs all drafts to a timestamped file: `/marketing/drafts/2026-03-05-posts.md`
+1. **Trigger evaluation** (runs automatically or manually):
+   - Checks commit count since last post (threshold: 3-5)
+   - Checks token/interaction count since last post (threshold: ~50K tokens or ~30 tool calls)
+   - Checks for high-signal events (test green, new file, tag, merge, correction, knowledge promotion)
+   - Checks cooldown: `last_queued_at` must be >15 min ago
+   - If triggered, proceeds to step 2. If not, stays quiet.
 
-For the Claude Code side, you could create a custom slash command that:
-- Reads your current session's work (commits, code changes, issues closed)
-- Generates posts at the end of your work session
-- Integrates directly into your workflow without friction
+2. **Reads sources** (all from `.crux/` — this is why tool-agnostic matters):
+   - `git log` since last marketing post (not since "1 day ago" — since last post)
+   - `.crux/sessions/` for session context: modes used, tool switches, corrections
+   - `.crux/corrections/corrections.jsonl` for AI correction stories (great content)
+   - `.crux/knowledge/` for newly promoted knowledge entries
+   - Commit messages and diffs for technical context
+   - `.crux/marketing/history.json` to avoid repeat content
 
-**Weekly Generation**
+3. **Generates 1 draft** (not 3-5 — one at a time, matching the continuous rhythm):
+   - Single X tweet (280 chars, punchy) OR
+   - X thread (4-8 tweets, if enough material for a narrative arc)
+   - Saved to `.crux/marketing/drafts/[timestamp].md`
 
-Every Friday, extend the scope:
+4. **Inline review** (minimal interruption):
+   - Presents draft in 2-3 lines with character count
+   - `[a]pprove` — queue to Typefully immediately
+   - `[e]dit` — open in $EDITOR or edit inline, then approve
+   - `[s]kip` — discard, Crux won't resurface this material for 6 hours
+   - One keystroke. Back to building.
 
-- Claude reads the entire week's git activity (all commits, all closed issues)
+5. **Queue to Typefully** (automatic on approve):
+   - `POST https://api.typefully.com/v2/social-sets/288244/drafts`
+   - Auth: `Bearer` token from `.crux/marketing/typefully.key` (gitignored)
+   - Sets `publish_at` to max(now + 5min, last_queued_at + stagger_minutes)
+   - Threads: multiple objects in `platforms.x.posts[]`
+   - Updates `last_queued_at` in `.crux/marketing/state.json`
+   - Stores draft ID in `.crux/marketing/queued/[date].json` for tracking
+
+6. **Confirms** with one line: "Queued: [preview] → 7:42 PM"
+
+**Typefully API Integration (live, tested, working):**
+
+```
+Endpoint: POST https://api.typefully.com/v2/social-sets/{social_set_id}/drafts
+Auth:     Authorization: Bearer {api_key}
+Content:  application/json
+
+# Single tweet
+{
+  "platforms": { "x": { "enabled": true, "posts": [{"text": "..."}] }},
+  "publish_at": "2026-03-06T00:20:00Z"
+}
+
+# Thread (multiple posts)
+{
+  "platforms": { "x": { "enabled": true, "posts": [
+    {"text": "Tweet 1..."},
+    {"text": "Tweet 2..."},
+    {"text": "Tweet 3..."}
+  ]}},
+  "publish_at": "2026-03-06T00:35:00Z"
+}
+
+# Update existing draft
+PATCH /v2/social-sets/{id}/drafts/{draft_id}
+
+# List drafts (check status)
+GET /v2/social-sets/{id}/drafts
+```
+
+**Config stored in `.crux/marketing/config.json` (gitignored):**
+```json
+{
+  "typefully": {
+    "social_set_id": 288244,
+    "api_key_path": ".crux/marketing/typefully.key",
+    "account": "@splntrb",
+    "plan": "creator"
+  },
+  "triggers": {
+    "commit_threshold": 4,
+    "token_threshold": 50000,
+    "interaction_threshold": 30,
+    "high_signal_events": ["test_green", "new_mcp_tool", "git_tag", "pr_merge", "crux_switch", "crux_adopt", "knowledge_promoted", "correction_detected"],
+    "cooldown_minutes": 15,
+    "target_posts_per_hour": 1,
+    "quiet_hours": null
+  },
+  "defaults": {
+    "platforms": ["x"],
+    "schedule_mode": "now"
+  },
+  "state_path": ".crux/marketing/state.json",
+  "history_path": ".crux/marketing/history.json"
+}
+```
+
+**Periodic Generation (every ~50-100 commits)**
+
+When enough material accumulates, extend the scope:
+
+- Claude reads all git activity since the last periodic generation
 - Generates one comprehensive blog post (1500-2500 words)
-- Drafts an X thread (10-15 tweets) summarizing the week
+- Drafts an X thread (10-15 tweets) summarizing the chunk of work
 - Creates a Reddit post for r/SideProject or r/LocalLLaMA
 - Suggests discussion topics for GitHub Discussions
 - Extracts "good first issue" candidates for attracting contributors
@@ -242,12 +347,10 @@ You're not abdicating your voice. You're outsourcing the low-leverage work.
 - Multiple format variations (Twitter thread vs. Reddit vs. blog)
 - Bulk of the writing (saves you 2-3 hours/week)
 
-**You handle (10-15 min per day):**
-- Read each draft
-- Add personal voice, insider jokes, specific context
-- Decide what actually happened (AI might miss nuance)
-- Approve or reject before publishing
-- Adjust timing based on your schedule
+**You handle (~5 seconds per draft, inline):**
+- Read the draft when it appears between commits
+- One keystroke: [a]pprove, [e]dit, or [s]kip
+- Edit if the AI missed nuance or voice
 - Personalize with real details only you know
 
 **You absolutely never automate:**
@@ -268,7 +371,7 @@ Not all platforms are equal for Crux. Some are high-leverage, some are nice-to-h
 X is where developers hang out. Where technical discussions happen. Where your potential users spend 30 minutes every morning. The algorithm rewards shipping updates and technical insights. Most importantly, X conversations get indexed by Google—your thread about why you chose local LLMs over cloud APIs might be someone's answer to "should I use cloud or local?"
 
 **Posting frequency:**
-3-5 posts per day. Sounds like a lot, but you're scheduling them via Typefully at different times. Some are morning (4-8 AM your time), some are midday (11 AM-2 PM), some are evening (5-7 PM). Spreads the reach, hits different timezones.
+~1 post per hour while you're working, minimum 15 min between posts. You work around the clock, so posts go out around the clock. This is actually ideal for #buildinpublic — followers in different timezones always have something fresh. Crux generates drafts continuously from your actual work, you approve with one keystroke, Typefully queues them. On a heavy shipping day that's 10-15 posts. On a slower research day, maybe 3-5. The cadence matches your actual output, not an arbitrary schedule.
 
 **Content format that works:**
 - Shipping threads (your main content type). Structure: Problem → Solution → Impact → What's next
@@ -281,95 +384,95 @@ X is where developers hang out. Where technical discussions happen. Where your p
 
 **THREAD 1: Shipping Update**
 
-"Just shipped multi-agent coordination in Crux. This is the feature that makes the AI OS actually feel like an OS.
+"just shipped multi-agent coordination in Crux. this is the feature that makes it actually feel like rails for AI.
 
-Here's the problem: every AI tool treats each task in isolation. Call function. Wait for result. Call next function. Stupid. Humans don't work like that.
+here's the problem: every AI tool treats each task in isolation. call function. wait for result. call next function. stupid. humans don't work like that.
 
-With multi-agent coordination, your AI can:
-- Spawn sub-agents for parallel work
-- Have agents negotiate with each other
-- Share context across a session
-- Handle interrupts and reprioritization
+with multi-agent coordination, your AI can:
+- spawn sub-agents for parallel work
+- have agents negotiate with each other
+- share context across a session
+- handle interrupts and reprioritization
 
-Example: You ask Crux to 'refactor this codebase and deploy it.' Instead of doing it sequentially, it spawns 3 agents: one reads the codebase, one designs the refactor, one writes the deploy config. They work in parallel. They share findings. If the reader finds something important, the writer knows about it.
+example: you ask Crux to 'refactor this codebase and deploy it.' instead of doing it sequentially, it spawns 3 agents: one reads the codebase, one designs the refactor, one writes the deploy config. they work in parallel. they share findings. if the reader finds something important, the writer knows about it.
 
-This is infra, not prompts. The agents are running in the same context window, share memory, can interrupt each other.
+this is infra, not prompts. the agents are running in the same context window, share memory, can interrupt each other.
 
-Why does this matter? Because real engineering isn't linear. It's parallel, collaborative, and adaptive. We built the infra to make it native to Crux.
+why does this matter? because real engineering isn't linear. it's parallel, collaborative, and adaptive. we built the infra to make it native to Crux.
 
-Code: [GitHub link]. Install: `pip install crux`. Docs: [link].
+code: [GitHub link]. install: `pip install crux`. docs: [link].
 
-Next: distributed coordination (agents running on different machines)."
+next: distributed coordination (agents running on different machines)."
 
 **TWEET 2: Bug Fix**
 
-"Spent 3 hours on a wild goose chase. Crux inference was getting slower every hour. Memory leak, right? Nope. Cache eviction was triggering garbage collection during token generation. One line of code: `gc.disable()` during inference, re-enable after. 10x latency improvement. Shipped."
+"spent 3 hours on a wild goose chase. Crux inference was getting slower every hour. memory leak, right? nope. cache eviction was triggering garbage collection during token generation. one line of code: `gc.disable()` during inference, re-enable after. 10x latency improvement. shipped."
 
 **THREAD 3: Architectural Decision**
 
-"Why we built Crux's safety pipeline from scratch instead of using existing alignment frameworks.
+"why we built Crux's safety pipeline from scratch instead of using existing alignment frameworks.
 
-Here's the heresy: most safety frameworks are built for deployment. They assume: you have a frozen model, users query it, you filter outputs.
+here's the heresy: most safety frameworks are built for deployment. they assume: you have a frozen model, users query it, you filter outputs.
 
-Crux is different. The model learns from corrections. Every user interaction feeds back into the model's internal rules. So a static safety layer breaks immediately.
+Crux is different. the model learns from corrections. every user interaction feeds back into the model's internal rules. so a static safety layer breaks immediately.
 
-We needed:
-- Dynamic rule learning (from corrections)
-- Context-aware safety (rules change based on task)
-- User-specific rules (your safety preferences aren't mine)
-- Verifiable reasoning (why did it block that? you need to know)
+we needed:
+- dynamic rule learning (from corrections)
+- context-aware safety (rules change based on task)
+- user-specific rules (your safety preferences aren't mine)
+- verifiable reasoning (why did it block that? you need to know)
 
-So we built a safety pipeline that:
-1. Generates internal rules from user corrections
-2. Verifies rules don't contradict each other
-3. Allows user overrides with auditing
-4. Makes reasoning transparent
+so we built a safety pipeline that:
+1. generates internal rules from user corrections
+2. verifies rules don't contradict each other
+3. allows user overrides with auditing
+4. makes reasoning transparent
 
-Result: safer AI that actually improves over time. Instead of frozen constraints, living governance.
+result: safer AI that actually improves over time. instead of frozen constraints, living governance.
 
-This is the real difference from Claude, Cursor, every other tool. They safety-check at the output layer. We safety-check at the learned-rule layer.
+this is the real difference from Claude, Cursor, every other tool. they safety-check at the output layer. we safety-check at the learned-rule layer.
 
-Code shipping tomorrow."
+code shipping tomorrow."
 
 **TWEET 4: Contrarian Take**
 
-"Hot take: if you're still waiting for ChatGPT's API to be cheaper, you're missing the point. Local LLMs + Crux = 90% of the capability at 5% of the cost. And you own your data. Why are we still queuing requests to cloud APIs in 2026?"
+"hot take: if you're still waiting for ChatGPT's API to be cheaper, you're missing the point. local LLMs + Crux = 90% of the capability at 5% of the cost. and you own your data. why are we still queuing requests to cloud APIs in 2026?"
 
 **TWEET 5: Question to Community**
 
-"What's the biggest thing stopping you from using local LLMs in production? For us it was latency. Solved that. What's your blocker?"
+"what's the biggest thing stopping you from using local LLMs in production? for us it was latency. solved that. what's your blocker?"
 
 **THREAD 6: Tool-Agnostic Intelligence (NEW — use this one early and often)**
 
-"Your AI coding tool is a rental. Your intelligence should be an asset.
+"your AI coding tool is a rental. your intelligence should be an asset.
 
-Every time you teach Cursor a pattern, that knowledge is trapped in .cursor/. Switch to Claude Code? Start over. Try Aider? Start over. Your corrections, your context, your learned patterns — gone.
+every time you teach Cursor a pattern, that knowledge is trapped in .cursor/. switch to Claude Code? start over. try Aider? start over. your corrections, your context, your learned patterns — gone.
 
-We built .crux/ to fix this.
+we built .crux/ to fix this.
 
-.crux/ is a directory that lives in your project (and globally at ~/.crux/). It stores everything your AI learns: corrections, knowledge entries, session state, mode definitions, security audit results.
+.crux/ is a directory that lives in your project (and globally at ~/.crux/). it stores everything your AI learns: corrections, knowledge entries, session state, mode definitions, security audit results.
 
-When you run `crux switch opencode` after working in Claude Code, here's what happens:
+when you run `crux switch opencode` after working in Claude Code, here's what happens:
 1. Crux reads .crux/sessions/state.json (what you were working on, decisions made, files touched)
-2. Generates OpenCode-native configs from your .crux/ knowledge
-3. Writes handoff context so OpenCode picks up exactly where Claude Code left off
+2. generates OpenCode-native configs from your .crux/ knowledge
+3. writes handoff context so OpenCode picks up exactly where Claude Code left off
 
-Same project. Same intelligence. Different tool.
+same project. same intelligence. different tool.
 
-We support Claude Code, OpenCode, Cursor, Aider, and Roo Code today. Any tool with MCP support can connect via `crux mcp start`.
+we support Claude Code, OpenCode, Cursor, Aider, and Roo Code today. any tool with MCP support can connect via `crux mcp start`.
 
-Your tools are disposable. Your intelligence isn't.
+your tools are disposable. your intelligence isn't.
 
 GitHub: [link]"
 
 **TWEET 7: The Switching Demo (NEW)**
 
-"Just did this:
-- 9am: Started auth refactor in Claude Code
+"just did this:
+- 9am: started auth refactor in Claude Code
 - 12pm: `crux switch opencode`
-- 12:01pm: OpenCode knew I was mid-refactor, which files I'd touched, which JWT library I'd chosen, what was left to do
+- 12:01pm: OpenCode knew i was mid-refactor, which files i'd touched, which JWT library i'd chosen, what was left to do
 
-Zero re-explaining. Zero lost context. That's .crux/"
+zero re-explaining. zero lost context. that's .crux/"
 
 **Rules to follow:**
 - Never sell on X. Share insights. The selling happens later.
@@ -420,34 +523,34 @@ Long-form technical posts. Not marketing. Not "check out my cool startup." Inste
 
 **POST 1: r/SideProject**
 
-**Title:** "I built an AI OS that improves by learning from corrections. Spent 6 months on it solo. Here's what I learned about AI safety."
+**Title:** "i built rails for AI coding tools that learns from corrections. spent 6 months on it solo. here's what i learned about AI safety."
 
-"I got frustrated with every AI coding tool being basically a glorified autocomplete. They don't learn from feedback. You correct them, and the next time you ask a similar question, they make the same mistake.
+"i got frustrated with every AI coding tool being basically a glorified autocomplete. they don't learn from feedback. you correct them, and the next time you ask a similar question, they make the same mistake.
 
-So I built Crux: an AI operating system that learns from corrections and bakes them into the model's rules. Every time you tell it to do something differently, it updates its internal understanding.
+so i built Crux: an intelligence framework for AI coding tools that learns from corrections and bakes them into the model's rules. every time you tell it to do something differently, it updates its internal understanding.
 
-**The architecture:**
-- Inference happens in a custom safety layer (not OpenAI's safety filters)
-- When you correct the AI, we generate a rule: "when the user says X, do Y instead"
-- These rules are verified for conflicts and stored in the model's context
-- Next time it faces a similar situation, it applies the learned rule
+**the architecture:**
+- inference happens in a custom safety layer (not OpenAI's safety filters)
+- when you correct the AI, we generate a rule: "when the user says X, do Y instead"
+- these rules are verified for conflicts and stored in the model's context
+- next time it faces a similar situation, it applies the learned rule
 
-**What made this hard:**
-- Most ML frameworks don't let you modify model behavior at runtime
-- Safety is usually a binary filter: approve or block. We needed ranked safety (some rules matter more than others)
-- Testing: how do you verify an AI system is actually learning correctly?
+**what made this hard:**
+- most ML frameworks don't let you modify model behavior at runtime
+- safety is usually a binary filter: approve or block. we needed ranked safety (some rules matter more than others)
+- testing: how do you verify an AI system is actually learning correctly?
 
-**Results:**
+**results:**
 - 1500+ GitHub stars in 2 months
-- Users reporting that Crux fixes bugs 30% of the time on second attempt (vs 5% for other tools)
-- Open source, MIT licensed
+- users reporting that Crux fixes bugs 30% of the time on second attempt (vs 5% for other tools)
+- open source, MIT licensed
 
-**What's next:**
-- Multi-agent coordination (agents can spawn sub-agents and coordinate)
-- Distributed inference (agents on different machines)
+**what's next:**
+- multi-agent coordination (agents can spawn sub-agents and coordinate)
+- distributed inference (agents on different machines)
 - Crux Vibe: commercial version for teams (launching soon)
 
-Happy to answer technical questions. The codebase is messy but real.
+happy to answer technical questions. the codebase is messy but real.
 
 [GitHub link]
 [Docs link]
@@ -457,29 +560,29 @@ Happy to answer technical questions. The codebase is messy but real.
 
 **Title:** "Why I'm betting on local LLMs instead of cloud APIs (and how Crux makes it practical)"
 
-"Every benchmarking article I read says the same thing: GPT-4 is smarter than local models. Fine. Sure. But that's one dimension.
+"every benchmarking article i read says the same thing: GPT-4 is smarter than local models. fine. sure. but that's one dimension.
 
-Here's what cloud APIs don't tell you:
-- Latency: OpenAI API adds 200-500ms to every request. Local is 50ms.
-- Cost: $0.03/1K tokens with OpenAI. Local LLM on your machine is basically free.
-- Privacy: Everything you send to OpenAI is probably logged somewhere.
-- Dependency: If their API is down, you're stuck. Local model? Always up.
-- Customization: You can't modify the safety rules in Claude's API. You can in local models.
+here's what cloud APIs don't tell you:
+- latency: OpenAI API adds 200-500ms to every request. local is 50ms.
+- cost: $0.03/1K tokens with OpenAI. local LLM on your machine is basically free.
+- privacy: everything you send to OpenAI is probably logged somewhere.
+- dependency: if their API is down, you're stuck. local model? always up.
+- customization: you can't modify the safety rules in Claude's API. you can in local models.
 
-Here's the catch: local LLMs are a pain to work with. Bad inference libraries, no safety pipeline, slow integration. That's why most people still use cloud APIs despite the downsides.
+here's the catch: local LLMs are a pain to work with. bad inference libraries, no safety pipeline, slow integration. that's why most people still use cloud APIs despite the downsides.
 
-So I built Crux to make local LLMs practical. It gives you:
-- Fast inference (batching, caching, GPU optimization)
-- Safety pipeline (learn rules from corrections, no static filters)
+so i built Crux to make local LLMs practical. it gives you:
+- fast inference (batching, caching, GPU optimization)
+- safety pipeline (learn rules from corrections, no static filters)
 - IDE integration (VSCode plugin, CLI, API)
-- Monitoring (see what the model is doing, why)
+- monitoring (see what the model is doing, why)
 
-**Honest comparison:**
-- If you need state-of-the-art reasoning, use Claude API
-- If you need something that works 90% of the time at 1% of the cost, use local + Crux
-- If you need privacy and control, local + Crux is the only answer
+**honest comparison:**
+- if you need state-of-the-art reasoning, use Claude API
+- if you need something that works 90% of the time at 1% of the cost, use local + Crux
+- if you need privacy and control, local + Crux is the only answer
 
-Crux is open source. You can fork it, modify it, deploy it anywhere.
+Crux is open source. you can fork it, modify it, deploy it anywhere.
 
 [GitHub link]
 [Benchmarks link]
@@ -489,30 +592,30 @@ Crux is open source. You can fork it, modify it, deploy it anywhere.
 
 **Title:** "Self-hosted AI coding assistant that actually learns from you (Crux)"
 
-"I'm tired of paying $20/month for coding assistants that make the same mistakes repeatedly. So I self-hosted an AI OS that learns.
+"i'm tired of paying $20/month for coding assistants that make the same mistakes repeatedly. so i built an intelligence layer that learns.
 
-It runs on any machine with a GPU (or CPU, slower but works). You point it at your codebase. It learns the architecture, your coding style, your preferences. When it makes a mistake, you correct it, and it learns.
+it runs on any machine with a GPU (or CPU, slower but works). you point it at your codebase. it learns the architecture, your coding style, your preferences. when it makes a mistake, you correct it, and it learns.
 
-Unlike other tools, Crux doesn't just predict the next token. It reasons about what you asked for, checks its reasoning against learned rules, and iterates. That's why it gets better over time.
+unlike other tools, Crux doesn't just predict the next token. it reasons about what you asked for, checks its reasoning against learned rules, and iterates. that's why it gets better over time.
 
-**Self-hosting benefits:**
-- Complete privacy (everything stays on your machine)
-- No API costs (local inference is free)
-- Can modify behavior (learn custom rules, no restrictions)
-- Offline mode (works without internet)
-- No rate limits
+**self-hosting benefits:**
+- complete privacy (everything stays on your machine)
+- no API costs (local inference is free)
+- can modify behavior (learn custom rules, no restrictions)
+- offline mode (works without internet)
+- no rate limits
 
-**Requirements:**
+**requirements:**
 - 4GB+ RAM
 - GPU optional (8GB VRAM gives decent speed)
 - 5 minutes to install
 
-**Community:**
+**community:**
 - 1500+ people using it
-- Active Discord
-- Weekly releases
+- active Discord
+- frequent releases
 
-I'm the solo maintainer, so releases come when I ship, not on a schedule. But it's stable enough for production use. Tons of people are running it locally or on servers.
+i'm the solo maintainer, so releases come when i ship, not on a schedule. but it's stable enough for production use. tons of people are running it locally or on servers.
 
 [Install link]
 [Documentation]
@@ -532,7 +635,7 @@ Tuesday, Wednesday, or Thursday, 8-9 AM EST. Submit at 8:02 AM EST and you hit t
 **Title format:**
 "Show HN: [Name] – [One sentence description]"
 
-Example: "Show HN: Crux – AI OS That Learns From Your Corrections"
+Example: "Show HN: Crux – Rails for AI Coding Tools"
 
 Never use hype words (revolutionary, game-changing, disrupting). Be precise. The description should be specific enough that someone unfamiliar with the space understands what it does.
 
@@ -542,45 +645,45 @@ Never use hype words (revolutionary, game-changing, disrupting). Be precise. The
 
 **Title:** "Show HN: Crux – Tool-Agnostic Intelligence Layer for AI Coding"
 
-"I built Crux because I got tired of losing context every time I switched AI coding tools.
+"i built Crux because i got tired of losing context every time i switched AI coding tools.
 
-Here's the problem nobody talks about: every AI coding tool traps your intelligence. You spend weeks teaching Cursor your codebase patterns. Then you try Claude Code. Everything you taught Cursor? Gone. You start over. Try Aider next? Start over again. Your corrections, your project context, your learned patterns — all locked in vendor-specific directories that don't talk to each other.
+here's the problem nobody talks about: every AI coding tool traps your intelligence. you spend weeks teaching Cursor your codebase patterns. then you try Claude Code. everything you taught Cursor? gone. you start over. try Aider next? start over again. your corrections, your project context, your learned patterns — all locked in vendor-specific directories that don't talk to each other.
 
-So I built `.crux/`.
+so i built `.crux/`.
 
-**What .crux/ is:**
+**what .crux/ is:**
 
-A directory structure (global `~/.crux/` + per-project `.crux/`) that stores everything your AI learns — corrections, knowledge entries, session state, mode definitions, safety rules. It's the source of truth.
+a directory structure (global `~/.crux/` + per-project `.crux/`) that stores everything your AI learns — corrections, knowledge entries, session state, mode definitions, safety rules. it's the source of truth.
 
-**How it connects to tools:**
+**how it connects to tools:**
 
-The Crux MCP Server is the brain. All logic lives in one place. Every tool connects to it via standard MCP protocol. Tools with hook support (Claude Code, OpenCode) add paper-thin shims (5-10 lines, zero logic) that forward events for correction detection and safety interception. Tools without hooks (Cursor, Cline) connect via MCP alone.
+the Crux MCP Server is the brain. all logic lives in one place. every tool connects to it via standard MCP protocol. tools with hook support (Claude Code, OpenCode) add paper-thin shims (5-10 lines, zero logic) that forward events for correction detection and safety interception. tools without hooks (Cursor, Cline) connect via MCP alone.
 
-Adding support for a new AI tool = one line in the tool's MCP config. Not a full adapter. Not a sync script. One config line.
+adding support for a new AI tool = one line in the tool's MCP config. not a full adapter. not a sync script. one config line.
 
-When you switch tools:
+when you switch tools:
 ```
 $ crux switch opencode    # saves session state, OpenCode connects to same MCP server
 ```
 
-OpenCode picks up exactly where Claude Code left off. Same knowledge. Same corrections. Same context. Same MCP server. The session state file (`.crux/sessions/state.json`) captures what you were working on, key decisions, files touched, and pending tasks.
+OpenCode picks up exactly where Claude Code left off. same knowledge. same corrections. same context. same MCP server. the session state file (`.crux/sessions/state.json`) captures what you were working on, key decisions, files touched, and pending tasks.
 
-**What else Crux does:**
+**what else Crux does:**
 
-- Seven-stage safety pipeline (preflight → test-spec → security-audit → second-opinion → human-approval → DRY_RUN → design-validation)
-- Self-improving from corrections (the AI learns from mistakes, generates knowledge entries)
+- seven-stage safety pipeline (preflight → test-spec → security-audit → second-opinion → human-approval → DRY_RUN → design-validation)
+- self-improving from corrections (the AI learns from mistakes, generates knowledge entries)
 - 21 specialized modes (build-py, debug, security, design-ui, infra-architect, etc.)
 - TDD/BDD enforcement gate (tests written before implementation)
-- Recursive security audit loop (audit → fix → re-audit until convergence)
+- recursive security audit loop (audit → fix → re-audit until convergence)
 - MCP server exposes 10+ tools: knowledge lookup, session state, correction detection, safety validation, mode prompts, project context
 
-**Currently supported tools:** Claude Code, OpenCode, Cursor, Aider, Roo Code. Any MCP-compatible tool can connect.
+**currently supported tools:** Claude Code, OpenCode, Cursor, Aider, Roo Code, Qwen-Agent. any MCP-compatible tool can connect.
 
-**The philosophy:** Your AI tools are disposable. Your intelligence is not. `.crux/` is the `.git` for AI coding intelligence — it belongs to you, travels with your project, and works with whatever tool you choose today or tomorrow.
+**the philosophy:** your AI tools are disposable. your intelligence is not. `.crux/` is the `.git` for AI coding intelligence — it belongs to you, travels with your project, and works with whatever tool you choose today or tomorrow.
 
 MIT licensed, fully open source.
 
-Happy to answer architecture questions. Code is on GitHub."
+happy to answer architecture questions. code is on GitHub."
 
 **Rules to follow:**
 - If you post to HN, you must be present in the comments for 24 hours. Answer every question, especially critical ones. This is non-negotiable.
@@ -596,7 +699,7 @@ Product Hunt is discovery. Thousands of people on PH are specifically looking fo
 PH is also credible currency in VC and tech circles. A successful PH launch is leverage in conversations with partners, investors, and high-profile users.
 
 **When to launch:**
-Launch Crux OS first (when it's stable, feature-complete, documented). That's maybe 1-2 months from now. Launch Crux Vibe (commercial version) 3-6 months after.
+Launch Crux first (when it's stable, feature-complete, documented). That's maybe 1-2 months from now. Launch Crux Vibe (commercial version) 3-6 months after.
 
 **Pre-launch (1 month before):**
 - Build your PH following (comment on 5 products every day for 2 weeks, give real feedback)
@@ -616,44 +719,44 @@ Launch Crux OS first (when it's stable, feature-complete, documented). That's ma
 
 **Example PH Launch Post:**
 
-"I spent the last 6 months building Crux because I got tired of AI coding tools that don't learn.
+"i spent the last 6 months building Crux because i got tired of AI coding tools that don't learn.
 
-Every tool out there has the same problem: when you correct them, they forget. The next time you ask a similar question, they make the same mistake. It's like they were designed to be stateless.
+every tool out there has the same problem: when you correct them, they forget. the next time you ask a similar question, they make the same mistake. it's like they were designed to be stateless.
 
-So I built something different.
+so i built something different.
 
-Crux is an AI operating system that learns from corrections. Every time you tell it to do something differently, it updates its internal rules. Next time it faces a similar situation, it applies what it learned.
+Crux is an intelligence framework for AI coding tools that learns from corrections. every time you tell it to do something differently, it updates its internal rules. next time it faces a similar situation, it applies what it learned.
 
-**How it works:**
+**how it works:**
 
-You install Crux locally (one command). It runs on your machine with any open model (Llama, Mistral, etc.). It integrates with VSCode, your terminal, your IDE.
+you install Crux locally (one command). it runs on your machine with any open model (Llama, Mistral, etc.). it integrates with VSCode, your terminal, your IDE.
 
-You ask it to solve a problem. It gives a solution. If it's wrong, you explain why. Crux generates a rule: "When the user says X, do Y instead." This rule is stored and applied to future requests.
+you ask it to solve a problem. it gives a solution. if it's wrong, you explain why. Crux generates a rule: "when the user says X, do Y instead." this rule is stored and applied to future requests.
 
-It's not magic—it's infrastructure. We made it fast (rule checking happens during token generation), safe (rules are verified for conflicts), and practical (you can override rules, see the reasoning, export them).
+it's not magic—it's infrastructure. we made it fast (rule checking happens during token generation), safe (rules are verified for conflicts), and practical (you can override rules, see the reasoning, export them).
 
-**What I'm proud of:**
+**what i'm proud of:**
 
-- Built in 6 months solo (no team, no funding)
+- built in 6 months solo (no team, no funding)
 - 1500+ stars, 800+ active users already
-- Code is real (not a demo), 10K+ lines, tested
-- Architecture is clean enough to fork and modify
-- Every component is documented
+- code is real (not a demo), 10K+ lines, tested
+- architecture is clean enough to fork and modify
+- every component is documented
 
-**What's next:**
+**what's next:**
 
-- Multi-agent coordination (agents can spawn and coordinate sub-agents)
-- Distributed inference (inference on separate hardware)
+- multi-agent coordination (agents can spawn and coordinate sub-agents)
+- distributed inference (inference on separate hardware)
 - Crux Vibe: paid version for teams (launching Q2)
 
-I'm asking for help with one specific thing: documentation. If you use Crux, you'll find gaps in the docs. File issues, open PRs, help make it better.
+i'm asking for help with one specific thing: documentation. if you use Crux, you'll find gaps in the docs. file issues, open PRs, help make it better.
 
 [GitHub] [Docs] [Discord]"
 
 ### YouTube
 
 **Why it matters:**
-YouTube is underused by developer tool founders. There's basically no competition for "building AI OS" content. You post one 5-minute video showing the feature, and it stays relevant for months. People search "how to setup local LLM" and find your tutorial. You get 50-100 views per video, which seems low, but those are engaged developers.
+YouTube is underused by developer tool founders. There's basically no competition for "building rails for AI coding" content. You post one 5-minute video showing the feature, and it stays relevant for months. People search "how to setup local LLM" and find your tutorial. You get 50-100 views per video, which seems low, but those are engaged developers.
 
 Plus, YouTube videos are incredibly good for SEO. A 5-minute video about "local LLM setup" can outrank 10 blog posts because Google favors video results.
 
@@ -671,7 +774,7 @@ No need for on-camera presence. Screen recordings + voiceover is perfect.
 
 **Example video ideas:**
 
-1. "Install Crux in 5 Minutes (Local AI OS)" – Just record screen, show the install command, show it working
+1. "Install Crux in 5 Minutes" – Just record screen, show the install command, show it working
 2. "How the Safety System Works in Crux" – Show the code, explain the logic, show it learning a rule
 3. "Crux vs. Cursor: Architecture Comparison" – Side-by-side comparison of how they differ
 4. "Building a Multi-Agent System with Crux" – Walkthrough of the API, code examples
@@ -788,7 +891,7 @@ Only start a Discord when you have 500+ Twitter followers or 2000+ GitHub stars.
 - #roadmap (your upcoming work)
 
 **What to do:**
-- Post weekly updates (here's what shipped this week, here's what's next)
+- Post periodic updates (here's what shipped recently, here's what's next)
 - Monthly office hours (1 hour video call, any questions, no structure)
 - Respond to questions within 24 hours
 - Celebrate community wins (someone contributed a feature? announce it)
@@ -811,92 +914,55 @@ Repurpose your X content to LinkedIn. Same shipping updates, architecture posts,
 - Crux Vibe announcements (when available)
 - Hiring (when you're ready to bring on team members)
 
-## 4. The Weekly Cadence
+## 4. The Continuous Cadence
 
-Here's a concrete schedule you can follow every week:
+You work 7 days a week, around the clock. The marketing system matches that — no day-of-week assignments, no time blocks. Here's how the different content types layer in:
 
-**Monday: Start of Week Commit Push**
-- Morning: You work on features, commit to GitHub
-- 5 PM: `/crux marketing` generates "week ahead" posts
-- Claude drafts: 1 X thread about this week's goals, 1 single tweet (teaser)
-- You review: 10 min
-- Action: Schedule for Tuesday-Wednesday mornings
+**Continuous (event-driven, automatic):**
+- Shipping tweets fire as you commit (~1/hour target)
+- Bug fix stories, architecture decisions, tool-switching demos
+- All generated by triggers, approved with one keystroke
+- This is 80% of your content volume
 
-**Content idea:** "This week we're shipping [feature]. Here's why it matters... [thread]"
+**Periodic (manual trigger or scheduled check):**
+- **Every ~50-100 commits**: Crux suggests a digest thread (8-12 tweets summarizing a chunk of work). Good for when you've been heads-down for a while and followers need a catch-up narrative.
+- **Every ~week of commits**: Crux suggests a Reddit post (long-form, technical) and a blog post outline (Dev.to/Hashnode). You finalize these when you feel like writing prose.
+- **Every release tag**: Changelog + thread auto-drafted.
 
-**Tuesday: Feature Ship**
-- Morning: You finish and merge a feature
-- 5 PM: Claude reads the commits and generates shipping posts
-- Claude drafts: 2-3 X tweets, 1 X thread (detailed), 1 Reddit post draft
-- You review: 15 min
-- Action: Schedule shipping thread for Wednesday morning, Reddit post for Thursday evening
+**Human-only (when you feel like it):**
+- Community engagement: comment on competitor threads, answer questions on Reddit/HN, respond to issues. Do this whenever you take a break from coding. 15-20 min bursts.
+- DMs to influencers, podcast pitches, conference talk applications: batch these monthly.
 
-**Content idea:** "Just shipped [feature]. The problem: [X]. The solution: [Y]. Why it's hard: [Z]."
-
-**Wednesday: Technical Deep-Dive**
-- Morning: You work on infrastructure/performance/architecture
-- 5 PM: Claude reads code diffs and generates technical content
-- Claude drafts: 1 Dev.to article outline, 1 X thread, 1 Hashnode post outline
-- You review: 20 min
-- Action: Spend Thursday evening writing the Dev.to post, schedule for Friday
-
-**Content idea:** "We refactored the inference engine. Here's what was broken, how we fixed it, and performance improvements."
-
-**Thursday: Community Day (Human Only)**
-- No code content generation
-- Morning: You spend 30 min engaging on Reddit, HN, Discord
-- Afternoon: You respond to issues, PRs, community questions
-- Evening: You comment on competitor posts, share insights, build relationships
-
-**Friday: Weekly Digest**
-- Morning: You gather the week's metrics (stars, users, issues, PRs)
-- 5 PM: Claude reads the entire week's git log and generates comprehensive content
-- Claude drafts: 1 blog post (full draft, 1500+ words), 1 X thread (10-15 tweets), 1 changelog
-- You review: 30 min
-- Action: Refine blog post, schedule for Monday morning publication
-
-**Content idea:** "This week we shipped 3 features, fixed 12 bugs, gained 400 stars. Here's what happened, what's next, and what surprised us."
-
-**Saturday: Optional Video**
-- If you have extra time: record a 5-8 min YouTube video of the week's best feature
-- 30 min setup, 10 min recording, 30 min editing
-- Claude provides: script outline, video description, SEO tags, thumbnail ideas
-- Action: Schedule for Sunday/Monday morning
-
-**Sunday: Rest & Scheduling**
-- Totally off, or light admin
-- Claude automatically schedules next week's queued posts (the ones you approved)
-- Just verify: all posts are scheduled correctly
-- Nothing ships until you explicitly approve
+**The key shift:** There's no "content creation time block." Content generation is woven into your building flow. Approve a tweet between commits. Review a thread while tests run. The overhead per post is ~5 seconds (one keystroke). The overhead per thread is ~2 minutes (quick read + approve/edit). That's it.
 
 ## 5. The Monthly Cadence
 
-One layer above weekly:
+One layer above the continuous flow. These are monthly content targets — hit them whenever they fit your rhythm, not on assigned days:
 
-**Week 1: Ship & Announce**
+**Ship & Announce (whenever a major release lands):**
 - Biggest release of the month (5-10 features, or 1 major breaking change)
 - X threads, Reddit posts, blog post, YouTube video
 - Preparation: documentation, examples, demo
 
-**Week 2: Technical Content & Community Engagement**
+**Technical Content & Community Engagement (once per month):**
 - Deep technical post (Dev.to article on architecture decision)
 - Community spotlights (retweet contributors, feature users)
-- GitHub discussions (start a discussion on the biggest technical decision from week 1)
+- GitHub discussions (start a discussion on the biggest technical decision recently)
 - Discord: monthly office hours
 
-**Week 3: Competitor Analysis & Contrarian Takes**
+**Competitor Analysis & Contrarian Takes (once per month):**
 - Write a comparison post (Crux vs. X, Y, or Z)
 - Honest assessment of where Crux is weaker
 - Why certain tradeoffs make sense for your philosophy
 - These posts generate discussion and build credibility (you're not pretending to be perfect)
 
-**Week 4: Retrospective & Metrics**
-- Blog post: monthly retrospective ("Here's what we shipped, what went wrong, what's next")
-- Twitter thread with metrics (stars, users, revenue, etc.)
+**Retrospective & Metrics (once per month):**
+- Blog post: monthly retrospective ("here's what we shipped, what went wrong, what's next")
+- X thread with metrics (stars, users, revenue, etc.)
 - Email update (if you have a mailing list) with same content
 - Document lessons learned for the next month
 
-**First Monday of Month: Metrics Review**
+**Metrics Review (once per month, ~15 min):**
 - Compile: stars gained, forks, users, revenue, blog views, social followers
 - Goal: identify what worked and what didn't
 - Adjust next month's strategy based on what resonated
@@ -958,9 +1024,18 @@ The scrappy stuff that punches above its weight.
 - Market the free tool, not Crux directly
 - Free tools get 10x more shares than product pitches
 
+**`crux adopt` — The Mid-Session Onboarding Story (NEW — highest-leverage onboarding tool)**
+- `crux adopt` is designed for the most common real-world scenario: you're deep into a project, you discover Crux, and you want to start using it without losing everything you've already built
+- Two-phase capture: (1) mechanical — parses git log for files touched, commit messages as decisions, detects tech stack, generates PROJECT.md, imports existing CLAUDE.md; (2) LLM brain dump — the current session's LLM writes its own handoff context, session state, knowledge entries, pending tasks, and discovered patterns using CLI args
+- The LLM brain dump is the key insight: the LLM knows things git log doesn't — WHY decisions were made, what corrections happened, what patterns were discovered, what's still pending
+- After `crux adopt`, the current session does a planned exit. Next session starts with full Crux MCP server + hooks active, seeded with rich context from the previous session
+- **Marketing angle**: This is a perfect demo video and blog post — "I was 3 hours into a Claude Code session. Ran `crux adopt`. It captured everything. New session picked up exactly where I left off, but now with correction detection, safety pipeline, and knowledge accumulation running."
+- **Content format**: Screen recording showing the adopt flow is the single most compelling demo you can create. Real project. Real context. Real continuity.
+- This solves the cold-start problem that kills most developer tools — you don't have to start a new project to try Crux
+
 **Conference Talks**
 - Apply to PyCon, AI conferences, etc. (April-June deadlines for fall conferences)
-- Topic: "Building a Self-Learning AI OS" or "Local LLMs in Production"
+- Topic: "Building Rails for AI Coding Tools" or "Portable Intelligence Across AI Tools"
 - If accepted: 50-500 live viewers, video on YouTube (5K+ views typical), speaking credibility
 - Effort: 5 hours prep, 1 hour presentation, 2 hours travel
 - ROI: massive credibility, direct access to engineers in the room
@@ -1120,10 +1195,11 @@ These are authentic, unique, and impossible for anyone else to replicate.
 Each AI tool has its own community. Cursor has a subreddit and Discord. Claude Code has r/ClaudeAI and the Anthropic Discord. Aider has a GitHub community. OpenCode has its own channels. You can engage in ALL of them authentically, because Crux works with all of them. You're not a competitor in any of these communities — you're an enhancement.
 
 This means:
-- r/cursor: "Here's how I use Cursor rules with Crux's safety pipeline"
-- r/ClaudeAI: "I carry my Claude Code project knowledge to OpenCode and back using .crux/"
-- Aider GitHub Discussions: "Here's how Crux modes map to Aider's conventions"
-- OpenCode Discord: "Using Crux MCP server with OpenCode for cross-project knowledge"
+- r/cursor: "here's how i use Cursor rules with Crux's safety pipeline"
+- r/ClaudeAI: "i carry my Claude Code project knowledge to OpenCode and back using .crux/"
+- Aider GitHub Discussions: "here's how Crux modes map to Aider's conventions"
+- OpenCode Discord: "using Crux MCP server with OpenCode for cross-project knowledge"
+- Qwen-Agent community: "Crux MCP server works with Qwen-Agent out of the box — one config line, full intelligence layer"
 
 You're welcome in every community because you help every community.
 
@@ -1147,72 +1223,89 @@ For tools with hook support (Claude Code, OpenCode), paper-thin shims (5-10 line
 - Each integration tutorial is content that targets a new tool's audience
 - As MCP adoption grows, Crux's addressable market grows automatically — zero additional development needed
 
+### The Qwen-Agent Opportunity (14K stars, MCP-native, Alibaba-backed)
+
+Qwen-Agent is Alibaba's open-source framework for building AI agent apps on Qwen models (Qwen 3.0+). 14K GitHub stars, 1.3K forks, active development. It matters for Crux for three reasons:
+
+**1. MCP-native = instant Crux integration.** Qwen-Agent already speaks MCP. That means connecting it to the Crux MCP server is literally one config line. No adapter needed. This is the "rails for AI" thesis working in real time — any tool that speaks the protocol gets the full Crux brain.
+
+**2. Different community, same pain point.** Qwen-Agent's community is developer-oriented, heavily international (China + global). These developers also use Claude Code, Cursor, or Copilot for other work. Their intelligence is fragmented across tools. Crux bridges that gap. The messaging: "build your Qwen-Agent apps with full context from your Claude Code sessions — .crux/ carries it."
+
+**3. The contrast with OpenClaw is content gold.** Qwen-Agent = structured developer framework (14K stars, enterprise/research). OpenClaw = consumer personal assistant (200K+ stars, viral growth). Both are agent frameworks. Both need Crux. But for completely different reasons:
+- Qwen-Agent devs need Crux because they work across multiple tools and want portable intelligence
+- OpenClaw users need Crux because their agent ecosystem has security problems Crux solves
+- The comparison blog post writes itself: "Qwen-Agent vs OpenClaw — two agent frameworks, one intelligence layer"
+
+**Content plays:**
+- "add Crux intelligence to Qwen-Agent in 30 seconds" tutorial (targets Qwen dev community)
+- Blog post: "Qwen-Agent, OpenClaw, and the case for portable AI intelligence" (positions Crux above both)
+- r/LocalLLaMA post about Qwen models + Crux (Qwen is popular in the local LLM community)
+- GitHub Discussion in Qwen-Agent repo offering MCP integration help
+
+**Add to the "works with" list:** Claude Code, OpenCode, Cursor, Aider, Roo Code, **Qwen-Agent**. Six tools. One `.crux/` directory. One MCP server. That's the pitch.
+
 ### Updated Example Posts for Tool-Agnostic Angle
 
 **Reddit r/SideProject (NEW post):**
 
 **Title:** "I built the .git for AI coding intelligence — your corrections and knowledge travel with you across tools"
 
-"Every AI coding tool creates its own knowledge silo. I've been building with Claude Code, OpenCode, and Cursor on the same projects, and I was constantly re-explaining context when switching between them.
+"every AI coding tool creates its own knowledge silo. i've been building with Claude Code, OpenCode, and Cursor on the same projects, and i was constantly re-explaining context when switching between them.
 
-So I built Crux, which puts all AI intelligence in a `.crux/` directory that any tool can read. When you switch tools, `crux switch <tool>` generates the right configs and injects your session state. The new tool picks up exactly where the old one left off.
+so i built Crux, which puts all AI intelligence in a `.crux/` directory that any tool can read. when you switch tools, `crux switch <tool>` generates the right configs and injects your session state. the new tool picks up exactly where the old one left off.
 
-It also has a seven-stage safety pipeline, 21 specialized modes, TDD enforcement, recursive security audits, and self-improving knowledge from corrections. But the killer feature is portability. Your intelligence is yours.
+it also has a seven-stage safety pipeline, 21 specialized modes, TDD enforcement, recursive security audits, and self-improving knowledge from corrections. but the killer feature is portability. your intelligence is yours.
 
-Works with Claude Code, OpenCode, Cursor, Aider, Roo Code. Any MCP-compatible tool can connect.
+works with Claude Code, OpenCode, Cursor, Aider, Roo Code. any MCP-compatible tool can connect.
 
-Open source, MIT licensed. [GitHub link]"
+open source, MIT licensed. [GitHub link]"
 
 **Reddit r/LocalLLaMA (NEW post):**
 
 **Title:** "Using .crux/ to carry local LLM intelligence between OpenCode, Aider, and Claude Code on the same project"
 
-"For those running local models with Ollama — I built Crux to make your local LLM intelligence portable across tools. Whether you're using OpenCode with a local model or Claude Code with Anthropic's API, your project knowledge, corrections, and session state live in `.crux/` and transfer seamlessly.
+"for those running local models with Ollama — i built Crux to make your local LLM intelligence portable across tools. whether you're using OpenCode with a local model or Claude Code with Anthropic's API, your project knowledge, corrections, and session state live in `.crux/` and transfer seamlessly.
 
-The session state file tracks what you were working on, decisions made, files touched, and pending tasks. When you switch tools, that context comes with you. No re-teaching the model your codebase. No lost corrections.
+the session state file tracks what you were working on, decisions made, files touched, and pending tasks. when you switch tools, that context comes with you. no re-teaching the model your codebase. no lost corrections.
 
-Also includes: safety pipeline, TDD gates, security auditing, 21 modes. But the portability is what sold me on building this — I was tired of re-explaining my own project to AI every time I tried a different tool.
+also includes: safety pipeline, TDD gates, security auditing, 21 modes. but the portability is what sold me on building this — i was tired of re-explaining my own project to AI every time i tried a different tool.
 
-Open source. [GitHub link]"
+open source. [GitHub link]"
 
-## 9. Updated Weekly Cadence
+## 9. Updated Continuous Cadence
 
-Integrate OpenClaw community engagement AND tool-agnostic content into your weekly schedule:
+All content generation is event-driven and continuous — no day-of-week assignments. You work 7 days a week, around the clock. The system matches that.
 
-**Monday-Wednesday:** Core content (shipping updates, technical deep-dives, blog prep)
+**Continuous (automatic, trigger-driven):**
+- Shipping tweets fire as you commit (~1/hour while active)
+- Architecture decisions, bug fixes, tool-switching demos — all auto-drafted
+- Approved with one keystroke, queued to Typefully
 
-**Thursday (Community Day):**
-- Reddit/HN engagement (existing)
-- Tool-community engagement (NEW — highest leverage day)
-  - Find "which AI tool?" threads on r/cursor, r/ClaudeAI, r/programming
-  - Comment with genuine tool-switching insights (never link Crux directly)
-  - Respond to tool-switching frustration posts
-- OpenClaw community engagement
-  - Respond to GitHub Discussions (security questions)
-  - ClawHub Discord: comment on new skills, offer feedback
-  - r/OpenClaw: share expertise, answer questions
-- Discord community management
+**Periodic (batched when material accumulates):**
+- Every ~50-100 commits: digest thread + Reddit post + blog post outline
+- Every release tag: changelog thread auto-drafted
+- Community engagement: comment on competitor threads, answer questions on Reddit/HN — do this in short bursts whenever you take a break from coding
 
-**Friday:** Weekly content generation (blog post, X thread roundup, Reddit post)
-
-**Sunday:** Metrics review + planning
-
-**Monthly (Week 2):** Publish OpenClaw community content (skill audit, tutorial, stack comparison)
+**Monthly:**
+- OpenClaw community content (skill audit, tutorial, stack comparison)
+- Metrics review + strategy adjustment
+- Influencer DMs, podcast pitches, conference talk applications
 
 ## 10. Updated Monthly Cadence
 
-**Week 1:** Standard shipping updates + ClawHub skill maintenance
+No week-by-week assignments — you ship continuously. Instead, these are monthly content targets to hit whenever they fit your flow:
 
-**Week 2:** OpenClaw community content
-- Publish security audit of popular ClawHub skill(s)
-- Write tutorial: "How to Build Secure OpenClaw Skills with Crux"
-- Comparison post: "Crux vs. Other Safety Solutions for OpenClaw"
+**Monthly content targets:**
+- 1 OpenClaw community piece (security audit of ClawHub skill, tutorial, or comparison post)
+- 1 "switching story" blog post (real workflow, real tools, real handoff)
+- 1 metrics review + strategy adjustment (compile stars, followers, engagement — identify what worked)
+- 1 deep technical post (Dev.to/Hashnode architecture deep-dive)
+- Post to whichever tool community is most active that month
 
-**Week 3:** Blog/podcast focus + community engagement + tool-switching content
-- Publish one "switching story" blog post (real workflow, real tools, real handoff)
-- Post to whichever tool community is most active that week
-
-**Week 4:** Monthly metrics review + planning + content retrospective
+**Monthly ops (batch when convenient):**
+- ClawHub skill maintenance
+- Content retrospective (which posts drove GitHub stars?)
+- Influencer outreach, podcast pitches
 
 ## 11. Updated Metrics Dashboard
 
@@ -1328,10 +1421,10 @@ Track these weekly:
 - Paying customers
 - Churn rate
 
-**Weekly Review (Sunday evening, 15 min):**
+**Periodic Review (every ~7 days, 15 min whenever it fits):**
 - Record all metrics in a simple spreadsheet
 - Identify patterns (what content type drove the most GitHub stars?)
-- Adjust next week's strategy based on what worked
+- Adjust strategy based on what worked
 
 **Growth Timeline (realistic)**
 
@@ -1370,147 +1463,219 @@ Month 12 (March 2027):
 
 This assumes consistent execution (4-6 hours/week on content creation, handled by AI) and shipping every week.
 
-## 14. Crux Marketing Mode
+## 14. Crux Marketing Mode (Live Infrastructure)
 
-Since Crux itself is about building infrastructure, not prompts, propose that Crux have a native marketing mode.
+Crux marketing mode is live infrastructure, not a proposal. The Typefully API integration is tested and working. The workflow runs inside your Claude Code session — generate, review, approve, queue. No context-switching.
 
-**The Command:**
+**The Command (manual trigger):**
 ```
-/crux marketing [--platform twitter|reddit|blog|all] [--period daily|weekly|monthly]
+crux marketing [--platform x|reddit|blog|all] [--force]
 ```
 
-**What it does:**
-1. Reads `git log --oneline --since="1 day ago"` (or 1 week, 1 month)
-2. Reads `.crux/sessions/` for session context: modes used, tool switches, corrections, knowledge generated
-3. Reads `.crux/corrections/corrections.jsonl` for interesting AI correction stories (great content)
-4. Reads `.crux/knowledge/` for newly promoted knowledge entries (architecture content)
-5. Extracts: feature names, bug fixes, refactors, performance improvements, tool switches, correction patterns
-6. Reads commit messages and diffs for context
-7. Generates:
-   - X posts (single tweets + threads)
-   - Reddit posts (long-form, technical)
-   - Blog post outlines (Dev.to ready)
-   - Changelog entries
-5. Suggests:
-   - Hashtags
-   - Optimal posting times (by platform)
-   - Visual elements (code snippets to highlight)
-6. Outputs to `/marketing/drafts/[date]-[platform].md`
+Most of the time you don't run this manually — Crux triggers automatically based on events. `--force` bypasses the cooldown gate.
 
-**Example output:**
+**End-to-End Workflow (continuous, event-driven):**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              crux marketing (continuous)                     │
+│                                                             │
+│  TRIGGERS (any of these fire the pipeline):                 │
+│     ├── 3-5 commits since last post                        │
+│     ├── ~50K tokens or ~30 tool calls since last post      │
+│     ├── high-signal event (tests green, new tool, tag,     │
+│     │   merge, crux switch, correction, knowledge)         │
+│     ├── manual: `crux marketing`                           │
+│     └── cooldown check: last post >15 min ago?             │
+│                                                             │
+│  1. GATHER (since last post, not since "today")             │
+│     ├── git log (commits since last marketing post)         │
+│     ├── .crux/sessions/ (modes, tool switches, context)     │
+│     ├── .crux/corrections/ (new correction stories)         │
+│     ├── .crux/knowledge/ (newly promoted entries)           │
+│     └── .crux/marketing/history.json (avoid repeats)        │
+│                                                             │
+│  2. GENERATE → 1 draft (matching continuous rhythm)         │
+│     └── .crux/marketing/drafts/[timestamp].md               │
+│                                                             │
+│  3. REVIEW (inline, one keystroke)                          │
+│     ┌──────────────────────────────────────────────┐        │
+│     │ DRAFT: tweet (247 chars)                     │        │
+│     │                                              │        │
+│     │ just shipped `crux adopt` — two-phase        │        │
+│     │ mid-session onboarding. start using crux     │        │
+│     │ on an existing project without losing         │        │
+│     │ context. phase 1: mechanical capture.         │        │
+│     │ phase 2: brain dump. #buildinpublic           │        │
+│     │                                              │        │
+│     │ [a]pprove  [e]dit  [s]kip                    │        │
+│     └──────────────────────────────────────────────┘        │
+│                                                             │
+│  4. QUEUE (automatic on approve)                            │
+│     └── POST to Typefully API                              │
+│         publish_at = max(now+5min, last_post+15min)        │
+│                                                             │
+│  5. CONFIRM (one line, back to work)                        │
+│     "queued: crux adopt tweet → 7:42 PM"                   │
+│                                                             │
+│  Target: ~1 post/hour. Floor: 15 min between posts.        │
+│  You never stop building. Posts drip alongside your work.   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**What Gets Generated (by trigger type):**
+
+**Commit-triggered (most common):**
+- shipping updates — what just landed, why it matters
+- bug fix stories — the hunt, the fix, the result
+- architecture decisions — why X over Y
+
+**High-signal event triggered:**
+- test suite green after red — debugging story
+- new MCP tool created — capability expansion story
+- `crux switch` or `crux adopt` — tool-switching demo content
+- knowledge promoted — architecture/learning story
+- correction detected — "the AI learned something" story
+
+**Manually triggered (threads, longer content):**
+- architecture deep-dive threads (6-10 tweets)
+- weekly digest threads (when you feel like reflecting)
+- comparison posts, contrarian takes
+
+**Milestone-triggered (automatic detection):**
+- star count milestones (100, 500, 1K, 5K): celebration + retrospective
+- first external contributor: thank-you post + spotlight
+- each release tag: changelog + feature highlights
+- tool switch count milestones: "crux switch has been run N times" stories
+
+**Draft File Format:**
 
 ```markdown
-# Marketing drafts for 2026-03-05
-
-## X Posts (3 generated)
-
-### SINGLE TWEET
-Status: DRAFT
-Platform: twitter
-Best time: 2026-03-06 09:00 EST
-Length: 280 characters
-
-Just fixed a memory leak in token caching that was causing 10x slowdown on long contexts.
-Now handles 100K token contexts at 50ms per token. Shipping today.
-
-Hashtags: #buildinpublic #opensource
-
+---
+type: thread
+platform: x
+suggested_time: 2026-03-06T12:00:00-05:00
+hashtags: [buildinpublic, opensource, aitools]
+sources: [git:abc123, correction:2026-03-05-001, knowledge:mcp-architecture]
+char_count: [247, 280, 195, 260, 198, 245]
 ---
 
-### THREAD
-Status: DRAFT
-Platform: twitter
-Best time: 2026-03-06 11:00 EST
-Length: 8 tweets
+[1/6]
+today i started building Crux — a self-improving intelligence framework for AI coding tools.
 
-[Tweet 1]
-We spent 4 hours tracking down a wild performance regression. Context longer than 10K tokens
-was getting slower and slower. Memory leak? Nope. Cache eviction? Getting warmer...
+Not another AI wrapper. Not another coding assistant.
 
-[Tweet 2]
-The problem: our LRU eviction policy was triggering garbage collection during token generation.
-Every 1024 tokens, Python's GC would pause inference for 50ms. Invisible until you stress test.
+rails that make every AI coding tool smarter, and get smarter themselves every time you use them.
 
-[Tweet 3]
-The fix: one line. gc.disable() during inference, re-enable after.
-
-Why it works: inference is deterministic. GC isn't needed during generation. Once done,
-re-enable and let Python clean up.
-
-[Tweet 4]
-Results: 100K token context, 50ms/token. Same hardware, no GPU upgrade. Pure algorithm.
-
-[Tweet 5]
-Code is on GitHub. Shipping in the next release (2-3 days).
-
-[Tweet 6]
-Open issues on weird performance regressions? Comment below. Happy to help debug.
-
----
-
-## Reddit Post (Draft)
-
-Status: DRAFT
-Platform: reddit
-Suggested subreddit: r/SideProject, r/LocalLLaMA
-Best day: Thursday (less competition)
-
-Title: "I Fixed a Memory Leak in Crux That Was Causing 10x Performance Degradation on Long Contexts"
-
-Body: [full post outline]
-
----
-
-## Blog Post Outline
-
-Status: DRAFT
-Platform: dev.to + hashnode
-Title: "Why Token Caching Performance Matters (And How We Optimized It)"
-
-Outline:
-1. The problem (performance degradation on 10K+ tokens)
-2. Investigation process (how we tracked it down)
-3. Root cause (GC during inference)
-4. Solution (disable GC during generation)
-5. Benchmarks (before/after)
-6. Lessons learned (invisible performance problems)
-
-Estimated length: 1500 words
+[2/6]
+The core idea: a ~/.crux/ directory that stores everything your AI learns...
 ```
 
-This is Crux eating its own dog food. You use your own tool to market itself.
+**Repeat-Prevention:**
 
-## 15. Budget (Approximately Zero)
+Crux tracks what's been posted in `.crux/marketing/history.json` — keyed by source (commit hash, correction ID, knowledge entry). If you already posted about commit `abc123`, it won't generate another post about it tomorrow. This prevents the "same shipping update three days in a row" problem.
+
+**Typefully API Reference (tested, live):**
+
+```
+Base URL:     https://api.typefully.com/v2
+Social Set:   288244 (@splntrb)
+Auth:         Bearer token in .crux/marketing/typefully.key (gitignored)
+
+POST   /social-sets/{id}/drafts          Create + optionally schedule
+PATCH  /social-sets/{id}/drafts/{did}    Update or schedule existing draft
+GET    /social-sets/{id}/drafts          List all drafts (filter by status)
+DELETE /social-sets/{id}/drafts/{did}    Delete a draft
+
+Scheduling: set "publish_at" (ISO 8601 UTC) to schedule
+Threads:    multiple objects in platforms.x.posts[]
+Platforms:  x, linkedin, threads, bluesky, mastodon (x only for now)
+```
+
+**Config: `.crux/marketing/config.json` (gitignored)**
+```json
+{
+  "typefully": {
+    "social_set_id": 288244,
+    "api_key_path": ".crux/marketing/typefully.key",
+    "account": "@splntrb",
+    "plan": "creator"
+  },
+  "triggers": {
+    "commit_threshold": 4,
+    "token_threshold": 50000,
+    "interaction_threshold": 30,
+    "high_signal_events": ["test_green", "new_mcp_tool", "git_tag", "pr_merge", "crux_switch", "crux_adopt", "knowledge_promoted", "correction_detected"],
+    "cooldown_minutes": 15,
+    "target_posts_per_hour": 1,
+    "quiet_hours": null
+  },
+  "voice": {
+    "style": "all lowercase except proper nouns",
+    "tone": "technical, direct, no hype, builder energy",
+    "never": ["Revolutionary", "Game-changing", "Excited to announce", "I'm thrilled"],
+    "examples_path": ".crux/marketing/voice-samples.md"
+  },
+  "defaults": {
+    "platforms": ["x"],
+    "schedule_mode": "now"
+  },
+  "state_path": ".crux/marketing/state.json",
+  "history_path": ".crux/marketing/history.json"
+}
+```
+
+**State: `.crux/marketing/state.json` (tracks continuous rhythm)**
+```json
+{
+  "last_queued_at": "2026-03-06T00:35:00Z",
+  "last_queued_id": 8281849,
+  "commits_since_last_post": 0,
+  "tokens_since_last_post": 0,
+  "interactions_since_last_post": 0,
+  "posts_today": 3,
+  "posts_this_hour": 1
+}
+```
+
+**Implementation in Crux MCP:**
+
+The marketing mode is one MCP tool (`crux_marketing_generate`) plus a mode definition in `.crux/modes/marketing.md` plus event hooks that increment counters and check trigger thresholds. The mode tells the LLM how to read sources, generate posts in the right voice (all lowercase except proper nouns, technical, direct), and present the inline review. The MCP tool handles Typefully API calls (create draft, schedule, list) and state management (cooldown tracking, history dedup).
+
+The event hooks are lightweight: PostToolUse increments `interactions_since_last_post`, commit detection increments `commits_since_last_post`, and each checks against thresholds. When a threshold is met and cooldown has elapsed, the hook triggers draft generation.
+
+This means marketing mode works from any tool that speaks MCP — Claude Code, OpenCode, etc. And because the marketing infrastructure lives in `.crux/`, if you switch coding tools, your marketing state, drafts, history, and config travel with you.
+
+## 15. Budget (Nearly Zero)
 
 **What you pay:**
 - Claude Code Pro Max: $200/month (already paying, not marginal)
-- Domain: $12/year (already have)
-- **New costs: $0**
+- Typefully Creator: $12.50/month (unlimited posts, full API access — required for automated pipeline)
+- runcrux.io domain: ~$30/year
+- cruxvibe.io domain: ~$30/year
+- Server: already have (not marginal)
+- **New marginal cost: ~$17.50/month** ($12.50 Typefully + ~$5 domains amortized)
 
 **What you don't pay for:**
-- Typefully (free tier: 3 posts/week unlimited, enough if you batch schedule)
-- Buffer (free tier: 3 posts/week, same limitation)
+- 11ty (free, open source)
 - OBS Studio (free, open source)
-- Hashnode (free, plus your domain)
 - Dev.to (free)
 - Discord (free)
 - GitHub (free for open source)
 - All social accounts (free)
 - Email (use Gmail)
+- Plausible/GoatCounter (free self-hosted, or ~$9/month hosted)
 
-**Optional tools (not required):**
-- Typefully Pro ($15/month): unlimited scheduling, better analytics, best time recommendations. Worth it if you scale to 10+ posts/day.
-- Hashnode Pro ($5/month): I'd skip this. Their free tier is fine.
-- YouTube Premium: Not necessary.
+**Why Typefully Creator is worth it:** The free tier caps at 3 scheduled posts and blocks API publishing. Creator unlocks unlimited scheduling and full API access, which is what powers the `crux marketing` → Typefully pipeline. Without it, you'd have to manually copy-paste every post into X. With it, approved posts queue automatically from your terminal. $12.50/month to automate your entire posting infrastructure is the best ROI in this whole plan.
 
-**Reality:** You can run this entire operation for $200-220/month (Claude only), and that's a cost you already pay for building.
+**Reality:** You can run this entire operation for ~$218/month (Claude + Typefully + domains), and Claude is a cost you already pay for building. The website hosting is free since you have a server.
 
 ## 16. Risk Mitigation
 
 **Burnout Risk**
 - *Problem:* Even with AI handling 80% of content creation, you could burn out doing marketing + building.
-- *Solution:* Marketing is not optional, it's part of your job now. Schedule it (Friday evening, 30 min). Don't overdo it.
-- *Reality check:* If you're working 60 hours/week, this plan asks for 6 of those. That's reasonable. If you're working 40 hours/week, cut frequency in half.
+- *Solution:* Marketing is not optional, it's part of your job now. But it's woven into your build flow — one-keystroke approvals between commits, not a separate time block. The overhead is ~5 seconds per post.
+- *Reality check:* Because the pipeline is event-driven and inline, the actual time cost is near zero. The AI drafts. You approve or skip. That's it.
 
 **Consistency Risk**
 - *Problem:* Some weeks you'll ship nothing. Some weeks you'll build infrastructure nobody sees. Posts will be irregular.
@@ -1520,7 +1685,7 @@ This is Crux eating its own dog food. You use your own tool to market itself.
 **Quality Risk**
 - *Problem:* AI-generated posts could sound robotic or miss the mark.
 - *Solution:* You review everything. No auto-publish. Your voice is the filter.
-- *Implementation:* Spend the 10-15 min every evening reviewing drafts. Edit heavily. Add jokes. Make it yours.
+- *Implementation:* Review inline as drafts appear — one keystroke to approve, edit, or skip. No batched review session needed.
 
 **Platform Risk**
 - *Problem:* If X dies, or Reddit kills your account, you lose leverage.
@@ -1528,9 +1693,9 @@ This is Crux eating its own dog food. You use your own tool to market itself.
 - *Reality:* Even if X collapses, you'll have 2K followers on Hashnode, 5 YouTube videos, 50 blog posts across platforms. That compounds.
 
 **Spam Perception Risk**
-- *Problem:* Posting 3-5 times a day could feel spammy.
-- *Solution:* Mix content types. Mix platforms. Mix authentic engagement. Never auto-engage (replies, RTs, follows). Always human.
-- *Implementation:* 40% shipping updates, 30% technical deep-dives, 20% community engagement, 10% fun stuff (memes, contrarian takes).
+- *Problem:* Posting ~1/hour while working could feel spammy.
+- *Solution:* Mix content types. Mix platforms. Mix authentic engagement. Never auto-engage (replies, RTs, follows). Always human review.
+- *Implementation:* 40% shipping updates, 30% technical deep-dives, 20% community engagement, 10% fun stuff (memes, contrarian takes). The cooldown gate (15 min floor) prevents bursts.
 
 **Audience Burnout Risk**
 - *Problem:* Even good content feels annoying if it's the same person, every day.
@@ -1539,35 +1704,382 @@ This is Crux eating its own dog food. You use your own tool to market itself.
 
 ---
 
-## Execution Starting Tomorrow
+## Execution (Already Started)
 
-Here's how to start without overthinking:
+**Day 1 (March 5, 2026) — DONE:**
+1. ~~Create Typefully account~~ — Done. @splntrb connected, Creator plan active.
+2. ~~Create Typefully API key~~ — Done. "Crux Marketing" key, stored for API access.
+3. ~~Post first content~~ — Done. 3 posts published/scheduled:
+   - 7:15 PM: Day 1 hook tweet (published)
+   - 7:35 PM: 6-tweet architecture deep-dive thread (scheduled)
+   - 8:00 PM: Shipping update with Day 1 metrics (scheduled)
+4. ~~Validate Typefully API integration~~ — Done. POST, PATCH, GET all tested and working.
 
-**This week:**
-1. Create a `/marketing` folder in your Crux repo
-2. Add a `MARKETING.md` file with this plan (so you can reference it)
-3. Set up `/crux marketing` command (or equivalent in your workflow)
-4. Create Typefully account (free tier)
-5. Post your first X thread tomorrow (about yesterday's work)
-6. Don't aim for perfect. Aim for shipped.
+**This week (remaining):**
+1. Register runcrux.io and cruxvibe.io domains
+2. Create `.crux/marketing/` directory structure in the Crux repo
+3. Store Typefully API key in `.crux/marketing/typefully.key` (gitignored)
+4. Create `.crux/marketing/config.json` with social set ID, website config, and defaults
+5. Scaffold 11ty project in `site/` directory
+6. Build runcrux.io landing page (hero + architecture diagram + tool logos)
+7. Write first 3 blog posts from Day 1 work
+8. Deploy to server, verify SSL, update Typefully bio to link runcrux.io
+9. Implement `crux_marketing_generate` MCP tool (reads sources, generates tweet + blog post)
+10. Wire Typefully API calls + blog post generation + deploy into the MCP tool
+11. Don't aim for perfect. Aim for shipped.
 
 **Next week:**
-1. Add Reddit + Dev.to to the rotation
-2. Set up Hashnode (map your domain)
-3. Write your first comprehensive blog post
-4. Engage on Reddit for 30 min (comment on others' posts, build goodwill)
+1. Wire the full pipeline: one keystroke = tweet queued + blog post published + site deployed
+2. Add RSS feed to runcrux.io
+3. Add changelog page (auto-populated from git tags)
+4. Submit to Google Search Console
+5. Add Reddit + Dev.to to the rotation
+6. Engage on Reddit for 30 min (comment on others' posts, build goodwill)
 
 **Month 2:**
-1. Plan your Product Hunt launch (Crux OS first)
-2. Start YouTube (weekly 5-min video)
-3. Solidify the weekly cadence
-4. Publish your GitHub Discussions setup
+1. Add docs section to runcrux.io (migrate from GitHub README)
+2. Add per-tool pages (/docs/claude-code, /docs/cursor, etc.)
+3. Set up Plausible or GoatCounter for privacy-respecting analytics
+4. Plan your Product Hunt launch
+5. Start YouTube (periodic 5-min videos)
+6. Solidify the continuous cadence
 
 **Month 3:**
 1. Product Hunt launch
 2. Second HN "Show HN" post
-3. First conference talk application
-4. Monthly metrics review
+3. cruxvibe.io landing page (when commercial product is ready)
+4. First conference talk application
+5. Monthly metrics review
+
+---
+
+## 17. The Website: runcrux.io (11ty Static Site + Build-in-Public Blog)
+
+**Domains:**
+- **runcrux.io** — open-source Crux project site, blog, docs, build-in-public log
+- **cruxvibe.io** — commercial Crux Vibe product (later, when ready)
+
+**Why 11ty:** Fast, zero-JS by default, markdown-native, Git-friendly. Every blog post is a markdown file committed to the repo. Deploys are a `git push`. No database. No CMS. No moving parts to break. Perfect for a solo developer who writes in a terminal.
+
+### Site Architecture
+
+```
+runcrux.io/
+├── /                        # Landing page: hero, one-liner, architecture diagram, CTA
+├── /blog/                   # Build-in-public blog index (reverse chronological)
+│   ├── /blog/day-1-crux/    # Auto-generated from first day's work
+│   ├── /blog/mcp-architecture/
+│   └── ...
+├── /docs/                   # Technical docs (can start as links to GitHub wiki/README)
+├── /changelog/              # Auto-generated from git tags/releases
+├── /about/                  # Solo founder story, philosophy, .crux/ explained
+└── /feed.xml                # RSS feed (11ty plugin)
+```
+
+### 11ty Project Structure
+
+```
+site/
+├── .eleventy.js             # Config: markdown, collections, filters
+├── package.json
+├── src/
+│   ├── _data/               # Global data (site metadata, navigation)
+│   ├── _includes/
+│   │   ├── base.njk         # Base HTML layout
+│   │   ├── post.njk         # Blog post layout
+│   │   └── components/      # Header, footer, nav, post-card
+│   ├── index.njk            # Landing page
+│   ├── about.md
+│   ├── blog/
+│   │   └── *.md             # Each post is a markdown file with frontmatter
+│   ├── changelog/
+│   │   └── index.njk        # Pulls from _data/releases.json or git tags
+│   ├── docs/
+│   │   └── index.md
+│   └── css/
+│       └── style.css        # Minimal, hand-written CSS. No Tailwind. No framework.
+├── _site/                   # Build output (gitignored)
+└── deploy.sh                # rsync to your server or git push to trigger deploy
+```
+
+### The Pipeline: Code → Post → Tweet → Blog
+
+This is the key integration. When the marketing trigger fires and you approve a post, **two things happen simultaneously:**
+
+```
+You're building. Trigger fires. Draft appears.
+
+     [a]pprove
+
+     → Typefully API: queue the tweet/thread (existing flow)
+     → ALSO: generate expanded blog post from the same source material
+     → Blog post is a markdown file written to site/src/blog/
+     → git add + git commit + git push
+     → Server pulls, 11ty rebuilds (< 1 second)
+     → runcrux.io/blog/new-post/ is live
+     → Tweet includes link to blog post for deeper context
+
+One keystroke. Tweet queued. Blog post published. Site rebuilt.
+```
+
+**The blog post is NOT the tweet.** The tweet is 1-3 sentences. The blog post is the expanded version — 200-800 words with code snippets, architecture diagrams, the "why" behind the decision. The tweet drives traffic to the blog. The blog drives traffic to GitHub.
+
+### Blog Post Auto-Generation
+
+When the marketing trigger fires, the MCP tool generates two outputs from the same source material:
+
+1. **Tweet/thread** (short, punchy, your voice) → Typefully
+2. **Blog post** (expanded, technical, includes code) → markdown file
+
+Blog post frontmatter format:
+```yaml
+---
+title: "wiring crux adopt for mid-session onboarding"
+date: 2026-03-05
+tags: [shipping, architecture, mcp]
+tweet_id: 8281849
+summary: "two-phase onboarding so you can start using Crux on an existing project without losing context"
+---
+```
+
+The `tweet_id` field cross-references the Typefully post, so the site can show "originally posted on X" with a link, and the tweet can include a "read more →" link to the blog post.
+
+### Blog Post Types
+
+Not every tweet gets a blog post. The MCP tool decides based on signal strength:
+
+- **High-signal events** (new MCP tool, architecture decision, tests pass after failure) → always generate blog post
+- **Milestone tweets** (git tag, PR merge, major feature) → always generate blog post
+- **Routine shipping updates** (fixed a bug, small refactor) → tweet only, no blog post
+- **Digest threads** (every ~50-100 commits) → always generate companion blog post (this becomes your "weekly update" equivalent)
+
+Target: ~3-5 blog posts per week. Not forced — they come from the natural rhythm of high-signal work.
+
+### Deployment
+
+You said you have a server. The deployment flow:
+
+```bash
+# In site/ directory
+npm run build          # 11ty builds to _site/
+rsync -avz _site/ user@server:/var/www/runcrux.io/
+
+# Or if server has git:
+git push origin main   # Server has post-receive hook that runs 11ty build
+```
+
+For the MCP tool integration, the `crux_marketing_generate` tool:
+1. Writes the blog post markdown to `site/src/blog/YYYY-MM-DD-slug.md`
+2. Runs `cd site && npm run build`
+3. Deploys (rsync or git push)
+4. Returns the live URL for inclusion in the tweet
+
+All of this happens in the same flow as the Typefully API call — one keystroke, both outputs.
+
+### The Landing Page
+
+runcrux.io homepage should be minimal and direct:
+
+```
+crux
+rails for AI coding tools
+
+your AI tools are disposable. your intelligence shouldn't be.
+
+.crux/ is a directory that stores everything your AI learns —
+corrections, patterns, session state, safety rules.
+it travels with you. no matter what tool you use.
+
+[view on GitHub]  [read the blog]  [get started]
+
+───────────────────────────────────
+
+works with:
+Claude Code · OpenCode · Cursor · Aider · Roo Code · Qwen-Agent
+
+───────────────────────────────────
+
+latest from the build log:
+[auto-populated from 3 most recent blog posts]
+```
+
+No JavaScript. No animations. No cookie banners. Sub-100KB page load. The site itself embodies the philosophy: infrastructure over decoration.
+
+### Design Principles
+
+- **All lowercase** in copy (matching your voice), proper nouns capitalized
+- **Monospace headings**, system font for body text
+- **Dark mode default** (developers), light mode toggle
+- **No tracking.** No Google Analytics. No cookies. If you want metrics, use server-side access logs or a privacy-respecting tool like Plausible or GoatCounter.
+- **Fast.** Target < 50ms TTFB, < 100KB total page weight. 11ty makes this trivial.
+- **RSS feed.** Developers subscribe to RSS. The 11ty RSS plugin makes this one line of config.
+
+### Integration with Marketing Config
+
+Add to `.crux/marketing/config.json`:
+```json
+{
+  "website": {
+    "domain": "runcrux.io",
+    "site_path": "site/",
+    "blog_path": "site/src/blog/",
+    "deploy_command": "cd site && npm run build && rsync -avz _site/ user@server:/var/www/runcrux.io/",
+    "generate_blog_post": true,
+    "blog_post_threshold": "high_signal",
+    "cross_link_tweets": true
+  }
+}
+```
+
+### State Tracking
+
+Add to `.crux/marketing/state.json`:
+```json
+{
+  "last_blog_post_at": "2026-03-06T00:35:00Z",
+  "last_blog_post_slug": "day-1-building-crux",
+  "blog_posts_today": 2,
+  "site_last_deployed_at": "2026-03-06T00:35:15Z"
+}
+```
+
+### Execution Timeline
+
+**This week:**
+1. Register runcrux.io and cruxvibe.io
+2. Scaffold 11ty project in repo (`site/` directory)
+3. Build landing page (hero + architecture diagram + tool logos)
+4. Write first 3 blog posts from today's work (Day 1 recap, MCP architecture decision, .crux/ directory design)
+5. Deploy to server, verify SSL
+6. Update Typefully bio/links to point to runcrux.io
+
+**Next week:**
+1. Wire blog post generation into `crux_marketing_generate` MCP tool
+2. Add deploy step to the marketing pipeline (one keystroke = tweet + blog + deploy)
+3. Add RSS feed
+4. Add changelog page (auto-populated from git tags)
+5. Submit to Google Search Console
+
+**Month 2:**
+1. Add docs section (start migrating from GitHub README)
+2. Add "works with" pages (one per tool: /docs/claude-code, /docs/cursor, etc.)
+3. Set up Plausible or GoatCounter for privacy-respecting analytics
+4. cruxvibe.io landing page (when commercial product is ready)
+
+---
+
+## 18. Competitive Analysis: Crux + OpenClaw vs Shipper 2.0
+
+Shipper 2.0 (by @nicholasdevhub) markets itself as "the first AI that can truly build and run a business for you." It wraps Claude's API in a hosted chat UI with an "Advisor" chatbot and a deploy pipeline, charging ~$25/100 credits (Pro plan ~$100/month). Their X launch made seven specific claims. Here's how Crux + OpenClaw stacks up against every single one — with real mechanisms, not marketing.
+
+### Claim 1: "Build web apps, mobile apps, and Chrome extensions"
+
+**Shipper reality:** Claude writes code in a hosted sandbox. Deploy is to their own infrastructure. Mobile and Chrome extension support is unsubstantiated — no demo, no docs, no user reports.
+
+**Crux + OpenClaw reality:**
+- **Web apps:** OpenClaw's `web-hosting` skill provides zero-friction deploy to Vercel or Netlify. It auto-detects your framework (Next.js, Vite, plain HTML), wires CI/CD, handles custom domains, and manages environment variables. This is a real, documented, community-tested skill with thousands of users.
+- **Mobile apps:** React Native / Expo support exists through community projects and ClawHost's RN mobile app component. Not as seamless as web deploy, but it's real and it works.
+- **Chrome extensions:** OpenClaw's code execution + browser automation (`chrome-relay` extension + headless Playwright) makes building and testing Chrome extensions feasible. The manifest.json / popup / background script pattern is well within Claude Code's capabilities, and Crux's correction memory means the agent learns your extension's architecture across sessions.
+- **What Crux adds:** Every architectural decision, every bug fix pattern, every framework quirk gets stored in `.crux/`. The next app builds faster because the intelligence compounds. Shipper starts from zero every session.
+
+**Verdict: Crux + OpenClaw delivers. Web apps are stronger than Shipper. Mobile and Chrome extensions are feasible with real tooling, not vaporware.**
+
+### Claim 2: "Code, design, monetize, launch"
+
+**Shipper reality:** "Code" = Claude writes code (any wrapper does this). "Design" = unsubstantiated, no Figma integration or design system. "Monetize" = no evidence of payment integration. "Launch" = deploy to their hosting.
+
+**Crux + OpenClaw reality:**
+- **Code:** Claude Code / OpenCode / Cursor / Aider — take your pick. Crux makes your intelligence portable across all of them.
+- **Design:** OpenClaw's browser automation can interact with design tools. More practically, Claude Code generates Tailwind/CSS with increasingly good design sense, and Crux's corrections file means you teach it your design preferences once and they persist.
+- **Monetize:** OpenClaw's `stripe` skill handles the full payment lifecycle — PaymentIntents, subscriptions, invoicing, refunds, webhook handling, test/live mode switching. This isn't a marketing claim; it's a real MCP skill that interacts with Stripe's API. You can go from "add payments" to working checkout in one session.
+- **Launch:** OpenClaw `web-hosting` skill deploys to Vercel/Netlify. DNS, SSL, CI/CD — all handled. Plus Crux's marketing pipeline can auto-generate the launch tweet and blog post from the same session.
+
+**Verdict: Crux + OpenClaw delivers on all four, with real mechanisms. Shipper's "monetize" claim has zero supporting evidence. OpenClaw's Stripe skill actually exists.**
+
+### Claim 3: "Do email marketing for you"
+
+**Shipper reality:** This is the most unsubstantiated claim. No documentation, no screenshots, no user reports of Shipper sending emails or managing subscriber lists. Zero evidence this feature exists.
+
+**Crux + OpenClaw reality:**
+- **Gmail integration:** OpenClaw's email skills use Gmail Pub/Sub for real-time email monitoring. Read, compose, reply, label, search — all through MCP tools.
+- **Transactional email:** Resend and SMTP skills for sending from your own domain. HTML templates, attachments, the works.
+- **Newsletter management:** Subscriber tracking, open/click analytics, list management. This is built into the email skill ecosystem.
+- **Automated sequences:** Combine OpenClaw's cron jobs with email skills. Schedule drip campaigns, follow-ups, digest emails — all running autonomously on your machine.
+- **What Crux adds:** Your email voice, your formatting preferences, your "don't email these people" rules — all stored in `.crux/corrections.md`. The agent learns what works and what doesn't from your feedback.
+
+**Verdict: Crux + OpenClaw actually delivers what Shipper only claims. Real Gmail integration, real sending infrastructure, real subscriber management.**
+
+### Claim 4: "Continue to build out new features"
+
+**Shipper reality:** The claim implies autonomous feature development. In practice, this means "you can ask Claude to add features in subsequent chat sessions." Every Claude wrapper does this. There's no evidence of proactive feature development.
+
+**Crux + OpenClaw reality:**
+- **Cron-based autonomous work:** OpenClaw's cron jobs can schedule tasks that run without human intervention. The documented "overnight app builder" pattern has users literally waking up to new features their agent built while they slept.
+- **Self-healing as feature iteration:** The 4-tier recovery system (KeepAlive → Watchdog → AI Emergency → Human Alert) means the agent doesn't just fix crashes — it can identify patterns of failure and proactively refactor to prevent them.
+- **What Crux adds:** This is where Crux's intelligence layer becomes the difference-maker. `.crux/sessions/` tracks what was built and why. `.crux/corrections.md` accumulates architectural preferences. `.crux/knowledge/` stores domain context. So when the agent builds new features autonomously, it does so with full knowledge of your codebase's patterns, your style preferences, and your past decisions. It's not just "Claude writing code" — it's Claude writing code informed by your project's entire history.
+
+**Verdict: Crux + OpenClaw delivers this for real with cron jobs and overnight autonomous building. Shipper's version is just "you can keep chatting with Claude."**
+
+### Claim 5: "Self-maintain in the long run"
+
+**Shipper reality:** No evidence. No documentation of monitoring, health checks, error recovery, or autonomous maintenance. This appears to be pure marketing.
+
+**Crux + OpenClaw reality:**
+- **4-tier self-healing architecture:**
+  - Tier 1 — KeepAlive (0-30s): Automatic restart on crash, state preservation
+  - Tier 2 — Watchdog (3-5min): Process monitoring, resource management, dependency checks
+  - Tier 3 — AI Emergency (5-30min): Claude Code analyzes the failure, writes a fix, tests it, deploys it
+  - Tier 4 — Human Alert: Escalation when autonomous recovery fails
+- **Cron-based maintenance:** Scheduled health checks, log rotation, dependency updates, database optimization — all running on your schedule.
+- **What Crux adds:** `.crux/corrections.md` accumulates maintenance patterns. "When this error occurs, do this." "This dependency breaks on update, pin it." "This endpoint needs rate limiting after 1000 req/min." The maintenance intelligence compounds over time, making each recovery faster and more accurate.
+
+**Verdict: Crux + OpenClaw has a real, documented, multi-tier self-healing system. Shipper has a marketing bullet point.**
+
+### Claim 6: "From a <10 word prompt"
+
+**Shipper reality:** Cherry-picked demo. "Build me a todo app" → working todo app. Sure. But "build me an e-commerce platform with subscription billing, email marketing, and mobile support" in <10 words? That's not how software works, regardless of the tool.
+
+**Crux + OpenClaw reality:**
+- A 10-word prompt works just as well (or poorly) with any Claude-powered tool. The quality of the output depends on the model, not the wrapper.
+- **Where Crux is actually better:** With `.crux/` context loaded, a 10-word prompt carries far more information than 10 words. "Add payments like the last project" is 6 words, but Crux knows what "like the last project" means because it has your Stripe integration patterns, your preferred checkout flow, and your error handling style all stored in the intelligence layer.
+- The honest framing: Simple apps from short prompts? Yes, any Claude tool does this. Complex apps? You'll need iterative sessions regardless — and Crux makes each iteration smarter because nothing is lost between sessions.
+
+**Verdict: Tie on simple prompts (any Claude wrapper does this). Crux wins on complex projects because context accumulates instead of resetting.**
+
+### Claim 7: "For as low as $0.12/app"
+
+**Shipper reality:** Extreme cherry-pick. At $25/100 credits, $0.12 means ~0.5 credits. That's maybe one short API call. A real app with iteration, debugging, and deployment would cost $5-50+ in Shipper credits. Their Pro plan is ~$100/month.
+
+**Crux + OpenClaw reality:**
+- **You pay the API provider directly.** Claude Code Pro is $100/month (unlimited within usage policy). OpenCode uses your own API key — you pay Anthropic/OpenAI directly at their rates.
+- **No middleman markup.** Shipper charges $25/100 credits on top of Claude's API costs. With Crux + OpenClaw, there's no wrapper tax.
+- **Real cost comparison:** A Claude Code Pro subscription gives you unlimited app building, maintenance, email automation, payment integration, deploys — everything. Same $100/month as Shipper's Pro plan, but with no credit limits, no per-app charges, and your intelligence compounds across everything you build.
+
+**Verdict: Crux + OpenClaw is cheaper for any real workload. No per-app pricing games, no credit system, no middleman markup.**
+
+### The Unfair Advantage: What Shipper Can Never Do
+
+Beyond matching every claim, Crux + OpenClaw has structural advantages Shipper can't replicate:
+
+1. **Portable intelligence.** Switch from Claude Code to Cursor to OpenCode mid-project. Your corrections, patterns, and knowledge travel with you. Shipper locks you into their chat UI.
+
+2. **Compounding knowledge.** Every app you build makes the next one faster. Shipper resets to zero every session.
+
+3. **Open source transparency.** You can audit every line of Crux. Shipper is a black box.
+
+4. **Tool-agnostic community.** Every AI coding tool community is your community. Shipper is one more walled garden competing with every other wrapper.
+
+5. **No vendor lock-in.** If Crux disappears tomorrow, your `.crux/` directory still works as context files for any AI tool. If Shipper disappears, you lose everything.
+
+6. **Self-improving safety.** Crux's corrections pipeline means "don't delete the production database" gets learned once and enforced forever. Shipper has no equivalent.
+
+### Bottom Line
+
+Shipper is a $100/month Claude API wrapper with marketing claims that range from real-but-unremarkable (Claude writes code) to unsubstantiated (email marketing, self-maintenance). Its value proposition is convenience — you don't need to set anything up.
+
+Crux + OpenClaw is an open-source intelligence framework running on top of battle-tested tools with 200K+ stars, 13,729+ community skills, real self-healing architecture, real payment integration, real email automation, and real autonomous operation. Its value proposition is compounding intelligence — every project makes the next one smarter.
+
+The marketing angle: **"Shipper promises it. We actually built it."**
 
 ---
 

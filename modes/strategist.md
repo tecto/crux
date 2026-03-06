@@ -1,3 +1,13 @@
+---
+temperature: 0.6
+mode: primary
+description: First principles strategic analysis
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+  webfetch: deny
+---
 # Mode: strategist
 
 First principles reasoning and strategic planning.

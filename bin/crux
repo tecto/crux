@@ -189,6 +189,58 @@ cmd_doctor() {
 }
 
 ###############################################################################
+# crux status — runtime insight
+###############################################################################
+cmd_status() {
+    local project_dir="${CRUX_PROJECT:-$(pwd)}"
+    local home_dir="${CRUX_HOME:-$HOME}"
+    local python_path
+
+    # Find Python
+    python_path="$(command -v python3 2>/dev/null || command -v python 2>/dev/null)"
+    if [ -z "$python_path" ]; then
+        error "Python not found"
+        exit 1
+    fi
+
+    local mode="${1:-full}"
+
+    cd "$CRUX_DIR"
+
+    case "$mode" in
+        health|--health)
+            echo -e "${BOLD}Crux Health Checks${NC}\n"
+            $python_path -c "
+import json, sys
+sys.path.insert(0, '.')
+from scripts.lib.crux_status import check_health, format_status, get_status
+checks = check_health(project_dir='$project_dir', home='$home_dir')
+passed = sum(1 for c in checks if c['passed'])
+total = len(checks)
+for c in checks:
+    mark = '\033[0;32m✓\033[0m' if c['passed'] else '\033[0;31m✗\033[0m'
+    print(f'  {mark} {c[\"name\"]}: {c[\"message\"]}')
+print()
+if passed == total:
+    print(f'\033[0;32m✓\033[0m All {total} checks passed')
+else:
+    print(f'\033[1;33m⚠\033[0m {passed}/{total} checks passed')
+"
+            ;;
+        *)
+            echo -e "${BOLD}Crux Status${NC}\n"
+            $python_path -c "
+import sys
+sys.path.insert(0, '.')
+from scripts.lib.crux_status import get_status, format_status
+status = get_status(project_dir='$project_dir', home='$home_dir')
+print(format_status(status))
+"
+            ;;
+    esac
+}
+
+###############################################################################
 # crux version
 ###############################################################################
 cmd_version() {
@@ -209,9 +261,11 @@ ${BOLD}Usage:${NC}
   crux <command> [options]
 
 ${BOLD}Commands:${NC}
+  status      Show runtime status (session, hooks, interactions, knowledge)
+  status --health  Run pass/fail health checks on Crux runtime
   setup       Run the interactive setup wizard
   update      Pull latest changes and refresh installation
-  doctor      Run health checks on your installation
+  doctor      Run infrastructure health checks (Ollama, OpenCode, symlinks)
   version     Show version information
   help        Show this help message
 
@@ -238,6 +292,7 @@ EOF
 # Main dispatch
 ###############################################################################
 case "${1:-help}" in
+    status)  shift; cmd_status "$@" ;;
     setup)   shift; cmd_setup "$@" ;;
     update)  shift; cmd_update "$@" ;;
     doctor)  cmd_doctor ;;

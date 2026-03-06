@@ -1,0 +1,471 @@
+"""Claude Code hook handlers for Crux integration.
+
+Handles events from Claude Code's hooks system:
+- SessionStart: inject Crux context (mode prompt, session state, pending tasks)
+- PostToolUse: track files touched, log all tool interactions
+- UserPromptSubmit: detect corrections in user messages
+- Stop: update session timestamps and interaction counts
+
+Each handler receives parsed event data and returns a result dict.
+The run_hook() function dispatches stdin JSON to the correct handler.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime, timezone
+
+from scripts.lib.crux_paths import get_project_paths, get_user_paths
+from scripts.lib.crux_session import load_session, save_session, update_session
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
+# Correction detection patterns
+# ---------------------------------------------------------------------------
+
+_CORRECTION_PATTERNS = [
+    re.compile(r"\bno[,.]?\s+(that'?s?\s+)?(wrong|not right|incorrect)", re.IGNORECASE),
+    re.compile(r"\bno[,.]?\s+(use|do|try|make)\b", re.IGNORECASE),
+    re.compile(r"\bactually[,.]?\s+(do|use|try|make)", re.IGNORECASE),
+    re.compile(r"\bwrong[,.]?\s+(use|do|try)", re.IGNORECASE),
+    re.compile(r"\bI said\b", re.IGNORECASE),
+    re.compile(r"\bthat'?s\s+incorrect\b", re.IGNORECASE),
+    re.compile(r"\bstop[,.]?\s+you'?re\s+(doing it\s+)?wrong\b", re.IGNORECASE),
+    re.compile(r"\bnot like that\b", re.IGNORECASE),
+    re.compile(r"\binstead\s*$", re.IGNORECASE),
+    re.compile(r"\bdo it this way\b", re.IGNORECASE),
+]
+
+
+def _is_correction(text: str) -> bool:
+    """Check if a user prompt contains a correction."""
+    if not text.strip():
+        return False
+    return any(p.search(text) for p in _CORRECTION_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# Interaction logging
+# ---------------------------------------------------------------------------
+
+def _log_interaction(tool_name: str, tool_input: dict, project_dir: str) -> None:
+    """Append a tool interaction to today's JSONL log."""
+    paths = get_project_paths(project_dir)
+    log_dir = os.path.join(str(paths.root), "analytics", "interactions")
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_file = os.path.join(log_dir, f"{_today()}.jsonl")
+    entry = {
+        "timestamp": _now_iso(),
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+    }
+    with open(log_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _log_conversation(
+    role: str,
+    content: str,
+    project_dir: str,
+    mode: str | None = None,
+    tool: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Append a conversation message to today's conversations JSONL log."""
+    paths = get_project_paths(project_dir)
+    log_dir = os.path.join(str(paths.root), "analytics", "conversations")
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_file = os.path.join(log_dir, f"{_today()}.jsonl")
+    entry: dict = {
+        "timestamp": _now_iso(),
+        "role": role,
+        "content": content,
+        "mode": mode,
+        "tool": tool,
+    }
+    if metadata:
+        entry["metadata"] = metadata
+    with open(log_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _count_interactions(project_dir: str) -> int:
+    """Count total interactions logged today."""
+    paths = get_project_paths(project_dir)
+    log_dir = os.path.join(str(paths.root), "analytics", "interactions")
+    log_file = os.path.join(log_dir, f"{_today()}.jsonl")
+    if not os.path.exists(log_file):
+        return 0
+    with open(log_file) as f:
+        return sum(1 for _ in f)
+
+
+# ---------------------------------------------------------------------------
+# Hook handlers
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# TDD compliance checker
+# ---------------------------------------------------------------------------
+
+# Maps source file patterns to their expected test file pattern templates.
+# Templates use \1, \2 etc. for backreferences from the source match.
+# A source file is "covered" if ANY of its test patterns match a touched file.
+# Files that match source patterns but don't need tests
+_SOURCE_EXCLUDES: list[re.Pattern[str]] = [
+    re.compile(r"__init__\.py$"),
+]
+
+_SOURCE_TEST_MAP: list[tuple[re.Pattern[str], list[str]]] = [
+    # Python with crux_ prefix: also match test files without the prefix
+    # e.g. crux_mcp_handlers.py → test_crux_mcp_handlers.py OR test_mcp_handlers*.py
+    (
+        re.compile(r"^scripts/lib/crux_(\w+)\.py$"),
+        [r"^tests/test_crux_\1\.py$", r"^tests/test_\1\w*\.py$"],
+    ),
+    # Python without crux_ prefix: exact match or partial
+    (
+        re.compile(r"^scripts/lib/(\w+)\.py$"),
+        [r"^tests/test_\1\.py$", r"^tests/test_\1\w*\.py$"],
+    ),
+    # setup.sh → any tests/setup_*.bats
+    (
+        re.compile(r"^setup\.sh$"),
+        [r"^tests/setup_\w+\.bats$"],
+    ),
+    # bin/crux → tests/crux_cli.bats
+    (
+        re.compile(r"^bin/crux$"),
+        [r"^tests/crux_cli\.bats$"],
+    ),
+    # JS plugins: plugins/*.js → tests/plugins*.test.js
+    (
+        re.compile(r"^plugins/[\w.-]+\.js$"),
+        [r"^tests/plugins[\w_]*\.test\.js$"],
+    ),
+    # JS tools: tools/*.js → tests/tools*.test.js
+    (
+        re.compile(r"^tools/[\w.-]+\.js$"),
+        [r"^tests/tools[\w_]*\.test\.js$"],
+    ),
+]
+
+
+def _normalize_path(file_path: str) -> str:
+    """Strip common project root prefixes to get a repo-relative path."""
+    # Handle absolute paths by finding known repo markers
+    for marker in ("scripts/lib/", "tests/", "plugins/", "tools/", "bin/", "setup.sh"):
+        idx = file_path.find(marker)
+        if idx > 0:
+            return file_path[idx:]
+    # If it's already relative or doesn't match, return basename-stripped
+    return file_path.lstrip("/")
+
+
+def _expected_test_path(source_path: str, match: re.Match, templates: list[str]) -> str:
+    """Build a human-readable expected test file path from the first template."""
+    concrete = templates[0]
+    for i, group in enumerate(match.groups(), 1):
+        concrete = concrete.replace(f"\\{i}", group if group else "")
+    # Strip regex anchors and convert regex patterns to readable paths
+    readable = concrete.lstrip("^").rstrip("$")
+    # Remove optional groups like (crux_)?
+    readable = re.sub(r"\([^)]*\)\?", "", readable)
+    # Convert character classes and quantifiers to glob-like hints
+    readable = re.sub(r"\\w[*+]", "*", readable)
+    readable = re.sub(r"\[[^\]]*\][*+?]?", "*", readable)
+    readable = readable.replace(r"\.", ".")
+    # Clean up double-stars or trailing stars before extension
+    readable = re.sub(r"\*+", "*", readable)
+    return readable
+
+
+def check_tdd_compliance(files_touched: list[str]) -> dict:
+    """Check whether source files have corresponding test files in the list.
+
+    Returns a dict with:
+      - compliant: bool — True if all source files have test coverage
+      - warnings: list[str] — human-readable warnings for uncovered files
+      - uncovered_sources: list[str] — source files without test coverage
+      - expected_tests: list[str] — test files that should have been modified
+    """
+    if not files_touched:
+        return {
+            "compliant": True,
+            "warnings": [],
+            "uncovered_sources": [],
+            "expected_tests": [],
+        }
+
+    normalized = [_normalize_path(f) for f in files_touched]
+    test_files = [f for f in normalized if f.startswith("tests/")]
+    uncovered: list[str] = []
+    expected_tests: list[str] = []
+
+    for norm_path in normalized:
+        if any(exc.search(norm_path) for exc in _SOURCE_EXCLUDES):
+            continue
+        for source_pattern, test_templates in _SOURCE_TEST_MAP:
+            m = source_pattern.match(norm_path)
+            if m:
+                # This is a source file — check if any test pattern matches
+                covered = False
+                for template in test_templates:
+                    # Substitute backreferences from the source match
+                    concrete = template
+                    for i, group in enumerate(m.groups(), 1):
+                        concrete = concrete.replace(f"\\{i}", group)
+                    concrete_re = re.compile(concrete)
+                    if any(concrete_re.match(tf) for tf in test_files):
+                        covered = True
+                        break
+                if not covered:
+                    uncovered.append(norm_path)
+                    expected_tests.append(
+                        _expected_test_path(norm_path, m, test_templates)
+                    )
+                break  # Only match first source pattern
+
+    warnings = [
+        f"TDD: {src} was modified without a corresponding test file"
+        for src in uncovered
+    ]
+
+    return {
+        "compliant": len(uncovered) == 0,
+        "warnings": warnings,
+        "uncovered_sources": uncovered,
+        "expected_tests": expected_tests,
+    }
+
+
+def handle_session_start(
+    event_data: dict,
+    project_dir: str,
+    home: str,
+) -> dict:
+    """Handle SessionStart event — inject Crux context."""
+    state = load_session(os.path.join(project_dir, ".crux"))
+    user_paths = get_user_paths(home)
+
+    parts: list[str] = []
+
+    # Mode prompt
+    mode_file = os.path.join(user_paths.modes, f"{state.active_mode}.md")
+    if os.path.exists(mode_file):
+        with open(mode_file) as f:
+            parts.append(f"## Active Mode: {state.active_mode}\n{f.read()}")
+
+    # Session state
+    parts.append(f"## Session State")
+    parts.append(f"- Mode: {state.active_mode}")
+    parts.append(f"- Tool: {state.active_tool}")
+    if state.working_on:
+        parts.append(f"- Working on: {state.working_on}")
+
+    # Pending tasks
+    if state.pending:
+        parts.append("\n## Pending Tasks")
+        for task in state.pending:
+            parts.append(f"- {task}")
+
+    # Key decisions
+    if state.key_decisions:
+        parts.append(f"\n## Key Decisions ({len(state.key_decisions)} total)")
+        for d in state.key_decisions[-5:]:  # last 5
+            parts.append(f"- {d}")
+
+    context = "\n".join(parts)
+    return {"status": "ok", "context": context}
+
+
+def handle_post_tool_use(
+    event_data: dict,
+    project_dir: str,
+    home: str,
+) -> dict:
+    """Handle PostToolUse — track files and log interactions."""
+    tool_name = event_data.get("tool_name", "")
+    tool_input = event_data.get("tool_input", {})
+    crux_dir = os.path.join(project_dir, ".crux")
+
+    result: dict = {"status": "ok"}
+
+    # Log every interaction
+    _log_interaction(tool_name, tool_input, project_dir)
+
+    # Track file touches for Edit/Write
+    if tool_name in ("Edit", "Write"):
+        file_path = tool_input.get("file_path")
+        if file_path:
+            update_session(crux_dir, add_file=file_path)
+            result["file_tracked"] = file_path
+
+    return result
+
+
+def handle_stop(
+    event_data: dict,
+    project_dir: str,
+    home: str,
+) -> dict:
+    """Handle Stop — update session timestamp, record interaction count, check TDD."""
+    crux_dir = os.path.join(project_dir, ".crux")
+    state = load_session(crux_dir)
+    save_session(state, project_crux_dir=crux_dir)  # updates timestamp
+
+    count = _count_interactions(project_dir)
+
+    # TDD compliance check
+    tdd = check_tdd_compliance(state.files_touched)
+
+    return {
+        "status": "ok",
+        "interaction_count": count,
+        "tdd_compliant": tdd["compliant"],
+        "tdd_warnings": tdd["warnings"],
+        "tdd_expected": tdd["expected_tests"],
+    }
+
+
+def handle_user_prompt(
+    event_data: dict,
+    project_dir: str,
+    home: str,
+) -> dict:
+    """Handle UserPromptSubmit — log conversation and detect corrections."""
+    prompt = event_data.get("prompt", "")
+    detected = _is_correction(prompt)
+
+    result: dict = {"status": "ok", "correction_detected": detected}
+
+    # Log all non-empty user messages to conversations
+    if prompt.strip():
+        state = load_session(os.path.join(project_dir, ".crux"))
+        _log_conversation(
+            role="user",
+            content=prompt,
+            project_dir=project_dir,
+            mode=state.active_mode,
+            tool=state.active_tool,
+        )
+
+    if detected:
+        # Log the correction
+        paths = get_project_paths(project_dir)
+        os.makedirs(paths.corrections, exist_ok=True)
+        entry = {
+            "original": prompt,
+            "corrected": "",
+            "category": "user-correction",
+            "mode": load_session(os.path.join(project_dir, ".crux")).active_mode,
+            "timestamp": _now_iso(),
+        }
+        with open(paths.corrections_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Hook runner — dispatches JSON events to handlers
+# ---------------------------------------------------------------------------
+
+def run_hook(
+    event_json: str,
+    project_dir: str,
+    home: str,
+) -> dict:
+    """Parse event JSON and dispatch to the appropriate handler."""
+    try:
+        event_data = json.loads(event_json)
+    except (json.JSONDecodeError, TypeError):
+        return {"status": "error", "message": "Invalid JSON"}
+
+    event_name = event_data.get("hook_event_name", "")
+
+    handlers = {
+        "SessionStart": handle_session_start,
+        "PostToolUse": handle_post_tool_use,
+        "Stop": handle_stop,
+        "UserPromptSubmit": handle_user_prompt,
+    }
+
+    handler = handlers.get(event_name)
+    if handler is None:
+        return {"status": "ok", "event": event_name, "action": "noop"}
+
+    return handler(event_data=event_data, project_dir=project_dir, home=home)
+
+
+# ---------------------------------------------------------------------------
+# Settings builder — generates .claude/settings.local.json hooks config
+# ---------------------------------------------------------------------------
+
+def build_hook_settings(project_dir: str, home: str) -> dict:
+    """Build the hooks configuration for .claude/settings.local.json."""
+    # Use absolute python path for reliability
+    import sys
+    python = sys.executable
+    runner = f"{python} -m scripts.lib.crux_hook_runner"
+
+    return {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"{runner} SessionStart",
+                        }
+                    ],
+                }
+            ],
+            "PostToolUse": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"{runner} PostToolUse",
+                        }
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"{runner} UserPromptSubmit",
+                        }
+                    ],
+                }
+            ],
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"{runner} Stop",
+                        }
+                    ],
+                }
+            ],
+        }
+    }

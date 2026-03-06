@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Root cause analysis and debugging
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: debug
 
 Root cause analysis and debugging.

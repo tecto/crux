@@ -3,19 +3,19 @@
 
 MODES_DIR="/Users/user/personal/crux/modes"
 
-# All 15 modes
-MODES=(build-py build-ex plan infra-architect review debug explain analyst writer psych legal strategist ai-infra mac docker)
+# All 22 modes
+MODES=(build-py build-ex plan infra-architect review debug explain analyst writer psych legal strategist ai-infra mac docker test security design-ui design-review design-system design-responsive design-accessibility)
 
 # Think routing from think-router.js
-THINK_MODES=(debug plan infra-architect review legal strategist psych)
-NO_THINK_MODES=(build-py build-ex writer analyst mac docker explain)
+THINK_MODES=(debug plan infra-architect review legal strategist psych security design-review design-accessibility)
+NO_THINK_MODES=(build-py build-ex writer analyst mac docker explain test design-ui design-system design-responsive)
 NEUTRAL_MODES=(ai-infra)
 
 # =========================================================================
 # File existence
 # =========================================================================
 
-@test "all 15 mode files exist" {
+@test "all 22 mode files exist" {
     for mode in "${MODES[@]}"; do
         if [ ! -f "$MODES_DIR/${mode}.md" ]; then
             echo "Missing mode file: ${mode}.md"

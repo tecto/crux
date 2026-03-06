@@ -1,3 +1,12 @@
+---
+temperature: 0.7
+mode: primary
+description: Teaching and mentoring
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: explain
 
 Teaching and mentoring through clear explanation.

@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Software architecture planning
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: plan
 
 Software architecture and design planning.

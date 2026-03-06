@@ -1,3 +1,13 @@
+---
+temperature: 0.7
+mode: primary
+description: macOS system operations
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+  webfetch: deny
+---
 # Mode: mac
 
 macOS systems administration and troubleshooting.

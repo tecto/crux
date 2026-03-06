@@ -60,9 +60,9 @@ REPO="/Users/user/personal/crux"
 # File counts match CLAUDE.md claims
 # =========================================================================
 
-@test "15 mode files exist (excluding template)" {
+@test "22 mode files exist (excluding template)" {
     count=$(ls -1 "$REPO/modes"/*.md 2>/dev/null | grep -v '_template' | wc -l | tr -d ' ')
-    [ "$count" -eq 15 ]
+    [ "$count" -eq 22 ]
 }
 
 @test "6 plugin files exist" {

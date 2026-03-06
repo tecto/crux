@@ -87,7 +87,7 @@ class TestMCPToolRegistration:
         assert server_module.mcp.name == "crux"
 
     def test_all_tools_registered(self, server_module):
-        """All 13 handler functions should be registered as MCP tools."""
+        """All handler functions should be registered as MCP tools."""
         tools = server_module.mcp._tool_manager._tools
         expected = {
             "lookup_knowledge",
@@ -103,13 +103,24 @@ class TestMCPToolRegistration:
             "get_project_context",
             "switch_tool_to",
             "log_correction",
+            "log_interaction",
+            "get_pipeline_config",
+            "get_active_gates",
+            "start_tdd_gate",
+            "check_tdd_status",
+            "start_security_audit",
+            "security_audit_summary",
+            "start_design_validation",
+            "design_validation_summary",
+            "check_contrast",
+            "restore_context",
         }
         registered = set(tools.keys())
         assert expected.issubset(registered), f"Missing tools: {expected - registered}"
 
     def test_tool_count(self, server_module):
         tools = server_module.mcp._tool_manager._tools
-        assert len(tools) >= 13
+        assert len(tools) >= 24
 
 
 class TestRunFunction:
@@ -172,3 +183,79 @@ class TestToolWrappers:
             original="bad", corrected="good", category="style", mode="build-py"
         )
         assert result["logged"]
+
+    def test_get_pipeline_config(self, live_env):
+        result = live_env["mod"].get_pipeline_config()
+        assert "metadata" in result
+        assert result["metadata"]["version"] == "2.0"
+
+    def test_get_active_gates(self, live_env):
+        result = live_env["mod"].get_active_gates(mode="build-py", risk_level="high")
+        assert 1 in result["active_gates"]
+        assert 2 in result["active_gates"]
+
+    def test_start_tdd_gate(self, live_env):
+        result = live_env["mod"].start_tdd_gate(
+            mode="build-py", feature="login",
+            components=["AuthService"], edge_cases=["expired token"],
+        )
+        assert result["mode"] == "build-py"
+
+    def test_check_tdd_status(self, live_env):
+        result = live_env["mod"].check_tdd_status()
+        assert "started" in result
+
+    def test_start_security_audit(self, live_env):
+        result = live_env["mod"].start_security_audit()
+        assert result["max_iterations"] == 3
+
+    def test_security_audit_summary(self, live_env):
+        live_env["mod"].start_security_audit()
+        result = live_env["mod"].security_audit_summary()
+        assert result["total_findings"] == 0
+
+    def test_start_design_validation(self, live_env):
+        result = live_env["mod"].start_design_validation()
+        assert result["wcag_level"] == "AA"
+
+    def test_design_validation_summary(self, live_env):
+        live_env["mod"].start_design_validation()
+        result = live_env["mod"].design_validation_summary()
+        assert result["status"] == "pass"
+
+    def test_check_contrast(self, live_env):
+        result = live_env["mod"].check_contrast(foreground="#000", background="#FFF")
+        assert result["ratio"] == 21.0
+
+    def test_restore_context(self, live_env):
+        result = live_env["mod"].restore_context()
+        assert "context" in result
+        assert "build-py" in result["context"]
+        assert "Building API" in result["context"]
+
+    def test_log_interaction_user_message(self, live_env):
+        result = live_env["mod"].log_interaction(
+            role="user", content="test message from OpenCode"
+        )
+        assert result["logged"]
+
+    def test_log_interaction_assistant_message(self, live_env):
+        result = live_env["mod"].log_interaction(
+            role="assistant", content="Here's the implementation..."
+        )
+        assert result["logged"]
+
+    def test_log_interaction_persists_to_file(self, live_env):
+        import json
+        live_env["mod"].log_interaction(
+            role="user", content="build the login page"
+        )
+        log_dir = os.path.join(live_env["project"], ".crux", "analytics", "conversations")
+        assert os.path.isdir(log_dir)
+        log_files = os.listdir(log_dir)
+        assert len(log_files) >= 1
+        with open(os.path.join(log_dir, log_files[0])) as f:
+            entry = json.loads(f.readline())
+        assert entry["role"] == "user"
+        assert entry["content"] == "build the login page"
+        assert entry["tool"] == "claude-code"  # live_env fixture sets active_tool=claude-code

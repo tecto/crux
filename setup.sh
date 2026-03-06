@@ -80,9 +80,9 @@ ask_choice() {
     local choices=("$@")
     local response
 
-    echo -e "\n${BOLD}$prompt${NC}"
+    echo -e "\n${BOLD}$prompt${NC}" >&2
     for i in "${!choices[@]}"; do
-        echo "  $((i+1)). ${choices[$i]}"
+        echo "  $((i+1)). ${choices[$i]}" >&2
     done
 
     while true; do
@@ -91,7 +91,7 @@ ask_choice() {
             echo "$((response-1))"
             return 0
         fi
-        echo "Invalid choice. Please enter a number between 1 and ${#choices[@]}."
+        echo "Invalid choice. Please enter a number between 1 and ${#choices[@]}." >&2
     done
 }
 
@@ -272,8 +272,14 @@ explain_quantization() {
 
 select_and_pull_models() {
     if state_done "models_pulled"; then
-        info "Model selection and pulling already completed (skipping)"
-        return 0
+        # Verify primary model actually exists
+        local saved_model
+        saved_model=$(state_read "primary_model")
+        if [ -n "$saved_model" ] && ollama list 2>/dev/null | grep -q "^${saved_model}"; then
+            info "Model selection and pulling already completed (skipping)"
+            return 0
+        fi
+        warn "Models state marked done but model missing — re-pulling"
     fi
 
     header "STEP 3: Model Selection and Pull"
@@ -297,13 +303,8 @@ select_and_pull_models() {
         warn "Available RAM may be insufficient for Q8_0. Current large processes:"
         ps aux -m | head -5
 
-        echo ""
-        echo -e "${BOLD}Options:${NC}"
-        echo "  1. Free memory for best quality (Q8_0)"
-        echo "  2. Proceed with Q6_K that fits now"
-
         local choice
-        choice=$(ask_choice "Choose option:" "Free memory for Q8_0" "Proceed with Q6_K")
+        choice=$(ask_choice "Options:" "Free memory for best quality (Q8_0)" "Proceed with Q6_K that fits now")
 
         if [ "$choice" = "0" ]; then
             warn "Please close applications and press Enter when ready"
@@ -314,42 +315,63 @@ select_and_pull_models() {
         fi
     fi
 
-    # Model selection menu
-    echo -e "\n${BOLD}Select primary model:${NC}"
-    echo "  1. Qwen3 32B (recommended general purpose)"
-    echo "  2. Qwen3-Coder 30B (code-specialized)"
-    echo "  3. Qwen3.5 27B (balanced)"
-    echo "  4. Custom (enter model name)"
+    # Detect already-installed models
+    local installed_models
+    installed_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
+
+    # Build labels with installed status inline
+    local label1="Qwen 3.5 27B — general purpose, multimodal"
+    local label2="Qwen 3 Coder 30B — code-specialized, MoE"
+    if echo "$installed_models" | grep -q "^qwen3.5:27b$"; then
+        label1="$label1 (installed)"
+    fi
+    if echo "$installed_models" | grep -q "^qwen3-coder:30b$"; then
+        label2="$label2 (installed)"
+    fi
 
     local model_choice
-    model_choice=$(ask_choice "Choose model:" \
-        "Qwen3 32B" \
-        "Qwen3-Coder 30B" \
-        "Qwen3.5 27B" \
-        "Custom")
+    model_choice=$(ask_choice "Select primary model:" \
+        "$label1" \
+        "$label2" \
+        "Custom (enter model name)")
 
     local primary_model
     case "$model_choice" in
-        0) primary_model="qwen3:32b" ;;
+        0) primary_model="qwen3.5:27b" ;;
         1) primary_model="qwen3-coder:30b" ;;
-        2) primary_model="qwen3.5:27b" ;;
-        3)
-            read -p "Enter model name (e.g., mistral:7b): " primary_model
+        2)
+            # Show installed models to help with selection
+            if [ -n "$installed_models" ]; then
+                echo ""
+                info "Installed locally:"
+                echo "$installed_models" | while read -r m; do echo "    $m"; done
+            fi
+            read -p "Enter model name (e.g., qwen3.5:27b, qwen:32b): " primary_model
             ;;
     esac
 
     state_save "primary_model" "$primary_model"
     state_save "model_quantization" "$suggested_choice"
 
-    info "Pulling primary model: $primary_model"
-    explain "This may take a while depending on model size and internet speed..."
-    ollama pull "$primary_model"
-    success "Primary model pulled: $primary_model"
+    # Pull primary model (skip if already installed)
+    if echo "$installed_models" | grep -q "^${primary_model}$"; then
+        success "Primary model already installed: $primary_model"
+    else
+        info "Pulling primary model: $primary_model"
+        explain "This may take a while depending on model size and internet speed..."
+        ollama pull "$primary_model"
+        success "Primary model pulled: $primary_model"
+    fi
 
     # Pull small model for auditing
-    info "Pulling small model for auditing (qwen3:8b)..."
-    ollama pull qwen3:8b
-    success "Audit model pulled: qwen3:8b"
+    local audit_model="qwen3.5:9b"
+    if echo "$installed_models" | grep -q "^${audit_model}$"; then
+        success "Audit model already installed: $audit_model"
+    else
+        info "Pulling audit model ($audit_model)..."
+        ollama pull "$audit_model"
+        success "Audit model pulled: $audit_model"
+    fi
 
     state_mark "models_pulled"
 }
@@ -360,8 +382,12 @@ select_and_pull_models() {
 
 create_modelfiles() {
     if state_done "modelfiles_created"; then
-        info "Modelfiles already created (skipping)"
-        return 0
+        # Verify models actually exist in Ollama
+        if ollama list 2>/dev/null | grep -q "crux-think" && ollama list 2>/dev/null | grep -q "crux-chat" && ollama list 2>/dev/null | grep -q "crux-code"; then
+            info "Modelfiles already created (skipping)"
+            return 0
+        fi
+        warn "Modelfiles state marked done but models missing — recreating"
     fi
 
     header "STEP 4: Modelfile Creation"
@@ -369,26 +395,23 @@ create_modelfiles() {
     local primary_model
     primary_model=$(state_read "primary_model")
 
-    # Ask about context size
-    echo -e "\n${BOLD}Select context window size:${NC}"
-    echo "  1. 16K tokens (minimal memory, faster inference)"
-    echo "  2. 32K tokens (balanced - recommended)"
-    echo "  3. 64K tokens (high memory, can track longer conversations)"
-    echo "  4. 128K tokens (requires 64GB+ RAM)"
-
-    local ctx_choice
-    ctx_choice=$(ask_choice "Choose context size:" "16K" "32K" "64K" "128K")
-
+    # Use saved context size if available, otherwise ask
     local num_ctx
-    case "$ctx_choice" in
-        0) num_ctx="16384" ;;
-        1) num_ctx="32768" ;;
-        2) num_ctx="65536" ;;
-        3) num_ctx="131072" ;;
-    esac
+    num_ctx=$(state_read "num_ctx")
+    if [ -z "$num_ctx" ]; then
+        local ctx_choice
+        ctx_choice=$(ask_choice "Select context window size:" "16K tokens (minimal memory, faster inference)" "32K tokens (balanced — recommended)" "64K tokens (high memory, longer conversations)" "128K tokens (requires 64GB+ RAM)")
 
-    explain "Selected context: $num_ctx tokens"
-    state_save "num_ctx" "$num_ctx"
+        case "$ctx_choice" in
+            0) num_ctx="16384" ;;
+            1) num_ctx="32768" ;;
+            2) num_ctx="65536" ;;
+            3) num_ctx="131072" ;;
+        esac
+        state_save "num_ctx" "$num_ctx"
+    fi
+
+    explain "Using context: $num_ctx tokens"
 
     # Create Modelfile for crux-think
     info "Creating Modelfile for crux-think (reasoning mode)..."
@@ -413,7 +436,7 @@ SYSTEM """You are a capable assistant operating within the Crux framework. Follo
 3. When the user says "let's talk through" or "discuss one at a time," present each item individually and wait for explicit confirmation before moving to the next.
 4. If uncertain, say so briefly rather than guessing.
 5. Match your response length and formality to the complexity of the request.
-6. All filesystem modifications must go through scripts in .opencode/scripts/ following the project script template. Never modify files directly.
+6. All filesystem modifications must go through scripts following the project script template. Never modify files directly.
 7. Before writing a new script, check if a custom tool, MCP server, or existing library script can handle the task. Prefer higher-tier tools over lower-tier ones.
 8. When you notice a task exceeds your current capability, say so and suggest alternatives rather than producing low-quality output.
 """
@@ -443,7 +466,7 @@ SYSTEM """You are a capable assistant operating within the Crux framework. Follo
 3. When the user says "let's talk through" or "discuss one at a time," present each item individually and wait for explicit confirmation before moving to the next.
 4. If uncertain, say so briefly rather than guessing.
 5. Match your response length and formality to the complexity of the request.
-6. All filesystem modifications must go through scripts in .opencode/scripts/ following the project script template. Never modify files directly.
+6. All filesystem modifications must go through scripts following the project script template. Never modify files directly.
 7. Before writing a new script, check if a custom tool, MCP server, or existing library script can handle the task. Prefer higher-tier tools over lower-tier ones.
 8. When you notice a task exceeds your current capability, say so and suggest alternatives rather than producing low-quality output.
 """
@@ -462,6 +485,45 @@ MODELFILE_EOF
     info "Creating crux-chat model variant..."
     ollama create crux-chat -f "$HOME/.ollama/models/modelfile-chat"
     success "crux-chat model created"
+
+    # Create Modelfile for crux-code (code-specialized, uses qwen3-coder if available)
+    local code_model="qwen3-coder:30b"
+    if ! ollama list 2>/dev/null | grep -q "^${code_model}"; then
+        info "Code model $code_model not yet available — using $primary_model for crux-code"
+        code_model="$primary_model"
+    fi
+
+    info "Creating Modelfile for crux-code (code execution mode)..."
+
+    cat > "$HOME/.ollama/models/modelfile-code" << 'MODELFILE_EOF'
+FROM {{CODE_MODEL}}
+
+# Code mode: lower temperature for precise code generation
+PARAMETER temperature 0.4
+PARAMETER top_p 0.8
+PARAMETER top_k 20
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx {{NUM_CTX}}
+PARAMETER num_gpu 64
+
+SYSTEM """You are a code-specialized assistant operating within the Crux framework. Follow these rules in every interaction:
+
+1. Always narrate what you are doing and why. Before taking action, briefly state your plan. During multi-step work, provide status updates. Never work silently.
+2. When asking clarifying questions, always use numbered lists. Never use bullet points for questions.
+3. Prioritize correct, secure, well-tested code. Validate all inputs, use parameterized queries, escape user data.
+4. Match existing project style and conventions. Verify all imports exist in project dependencies.
+5. All filesystem modifications must go through scripts following the project script template. Never modify files directly.
+6. Before writing a new script, check if a custom tool, MCP server, or existing library script can handle the task.
+7. Write tests for every change. Test edge cases. If uncertain, say so briefly rather than guessing.
+"""
+MODELFILE_EOF
+
+    sed -i '' "s|{{CODE_MODEL}}|$code_model|g" "$HOME/.ollama/models/modelfile-code"
+    sed -i '' "s|{{NUM_CTX}}|$num_ctx|g" "$HOME/.ollama/models/modelfile-code"
+
+    info "Creating crux-code model variant..."
+    ollama create crux-code -f "$HOME/.ollama/models/modelfile-code"
+    success "crux-code model created (base: $code_model)"
 
     state_mark "modelfiles_created"
 }
@@ -510,9 +572,15 @@ tune_environment() {
 ###############################################################################
 
 install_opencode() {
+    # Refresh PATH in case previous install added to .zshrc
+    export PATH="$HOME/.opencode/bin:$PATH"
+
     if state_done "opencode_installed"; then
-        info "OpenCode installation already completed (skipping)"
-        return 0
+        if command -v opencode &> /dev/null; then
+            info "OpenCode installation already completed (skipping)"
+            return 0
+        fi
+        warn "OpenCode state marked done but binary not found — reinstalling"
     fi
 
     header "STEP 6: OpenCode CLI Installation"
@@ -524,18 +592,13 @@ install_opencode() {
         return 0
     fi
 
-    echo -e "\n${BOLD}Installation method:${NC}"
-    echo "  1. curl (recommended)"
-    echo "  2. Homebrew"
-    echo "  3. npm"
-
     local install_choice
-    install_choice=$(ask_choice "Choose installation method:" "curl" "Homebrew" "npm")
+    install_choice=$(ask_choice "Installation method:" "curl (recommended)" "Homebrew" "npm")
 
     case "$install_choice" in
         0)
             info "Installing OpenCode via curl..."
-            curl -sSL https://install.opencode.dev/macos.sh | bash
+            curl -fsSL https://opencode.ai/install | bash
             ;;
         1)
             info "Installing OpenCode via Homebrew..."
@@ -543,9 +606,12 @@ install_opencode() {
             ;;
         2)
             info "Installing OpenCode via npm..."
-            npm install -g opencode
+            npm i -g opencode-ai@latest
             ;;
     esac
+
+    # Refresh PATH — curl installer adds to .zshrc but current shell doesn't have it
+    export PATH="$HOME/.opencode/bin:$PATH"
 
     # Verify installation
     if command -v opencode &> /dev/null; then
@@ -577,8 +643,9 @@ configure_opencode() {
 
     cat > "$config_dir/opencode.json" << 'EOF'
 {
+  "$schema": "https://opencode.ai/config.json",
   "model": "ollama/crux-think",
-  "small_model": "ollama/qwen3:8b",
+  "small_model": "ollama/qwen3.5:9b",
   "provider": {
     "ollama": {
       "options": {
@@ -586,17 +653,6 @@ configure_opencode() {
       }
     }
   },
-  "lsp": {
-    "python": {
-      "command": "pyright",
-      "args": ["--outputjson"]
-    },
-    "elixir": {
-      "command": "elixir-ls",
-      "alternative": "next-ls"
-    }
-  },
-  "timeout": 600000,
   "permission": {
     "edit": "ask",
     "bash": "ask"
@@ -627,12 +683,15 @@ install_modes() {
         return 1
     fi
 
-    # Symlink the entire modes directory
+    # Symlink the entire modes directory (legacy path)
     safe_symlink "$source_dir" "$config_dir/modes"
+
+    # Symlink modes → agents/ (OpenCode reads per-agent model config from agents/)
+    safe_symlink "$source_dir" "$config_dir/agents"
 
     local count
     count=$(ls -1 "$source_dir"/*.md 2>/dev/null | grep -v '_template' | wc -l | tr -d ' ')
-    success "Linked $count modes from repo → $config_dir/modes"
+    success "Linked $count modes from repo → $config_dir/modes + agents"
 }
 
 ###############################################################################
@@ -691,18 +750,16 @@ install_tools() {
         return 1
     fi
 
-    safe_symlink "$source_dir" "$config_dir/tools"
+    # Tools use a custom plugin-shim.js with Zod schemas that are incompatible
+    # with OpenCode's native tool loader (which expects @opencode-ai/plugin format).
+    # Tools are exposed to OpenCode via the Crux MCP server instead.
+    # Do NOT symlink tools/ into OpenCode's config directory.
+    info "Tools available via Crux MCP server (not symlinked to OpenCode)"
 
-    # Symlink lib/ (plugin-shim.js used by tools)
-    if [ -d "$CRUX_DIR/lib" ]; then
-        safe_symlink "$CRUX_DIR/lib" "$config_dir/lib"
-        success "Linked lib/ from repo (plugin-shim.js)"
-    fi
-
-    # Install Node.js dependencies (zod) required by tools
+    # Install Node.js dependencies (zod) required by tools and plugins
     info "Installing Node.js dependencies..."
     if command -v npm &>/dev/null; then
-        (cd "$CRUX_DIR" && npm install --production 2>/dev/null) || {
+        (cd "$CRUX_DIR" && npm install 2>/dev/null) || {
             warn "npm install failed — tools may not load correctly"
         }
         success "Node.js dependencies installed"
@@ -712,7 +769,7 @@ install_tools() {
 
     local count
     count=$(ls -1 "$source_dir"/*.js 2>/dev/null | wc -l | tr -d ' ')
-    success "Linked $count tools from repo → $config_dir/tools"
+    success "$count tools available via MCP server"
 }
 
 ###############################################################################
@@ -823,7 +880,7 @@ create_model_registry() {
     {
       "name": "crux-think",
       "provider": "ollama",
-      "baseModel": "${primary_model:-qwen3:32b}",
+      "baseModel": "${primary_model:-qwen3.5:27b}",
       "quantization": "${quantization:-Q8_0}",
       "parameterCount": 32000000000,
       "status": "assigned",
@@ -838,7 +895,7 @@ create_model_registry() {
     {
       "name": "crux-chat",
       "provider": "ollama",
-      "baseModel": "${primary_model:-qwen3:32b}",
+      "baseModel": "${primary_model:-qwen3.5:27b}",
       "quantization": "${quantization:-Q8_0}",
       "parameterCount": 32000000000,
       "status": "assigned",
@@ -851,9 +908,9 @@ create_model_registry() {
       }
     },
     {
-      "name": "qwen3:8b",
+      "name": "qwen3.5:9b",
       "provider": "ollama",
-      "baseModel": "qwen3:8b",
+      "baseModel": "qwen3.5:9b",
       "quantization": "Q8_0",
       "parameterCount": 8000000000,
       "status": "available",
@@ -1072,6 +1129,11 @@ install_crux_cli() {
 ###############################################################################
 
 optional_integrations() {
+    if state_done "optional_integrations"; then
+        info "Optional integrations already configured (skipping)"
+        return 0
+    fi
+
     header "STEP 19: Optional Integrations"
 
     # Continue.dev
@@ -1120,6 +1182,8 @@ auto-commits: true
 EOF
         success "Aider configured"
     fi
+
+    state_mark "optional_integrations"
 }
 
 ###############################################################################
@@ -1156,6 +1220,14 @@ verify_installation() {
         checks_passed=$((checks_passed + 1))
     else
         error "crux-chat model not found"
+    fi
+
+    checks_total=$((checks_total + 1))
+    if ollama list 2>/dev/null | grep -q "crux-code"; then
+        success "crux-code model available"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "crux-code model not found"
     fi
 
     # Check OpenCode
@@ -1197,11 +1269,11 @@ verify_installation() {
     local mode_count
     mode_count=$(ls -1 "$config_dir/modes"/*.md 2>/dev/null | grep -v '_template' | wc -l | tr -d ' ')
     checks_total=$((checks_total + 1))
-    if [ "$mode_count" -eq 15 ]; then
-        success "All 15 modes available"
+    if [ "$mode_count" -ge 15 ]; then
+        success "All $mode_count modes available"
         checks_passed=$((checks_passed + 1))
     else
-        error "Only $mode_count modes found (expected 15)"
+        error "Only $mode_count modes found (expected at least 15)"
     fi
 
     # Count commands
@@ -1226,8 +1298,12 @@ verify_installation() {
         error "Only $tool_count tools found (expected 7)"
     fi
 
-    # Check Node.js dependencies (zod)
+    # Check Node.js dependencies (zod) — auto-fix if missing
     checks_total=$((checks_total + 1))
+    if [ ! -d "$CRUX_DIR/node_modules/zod" ] && command -v npm &>/dev/null; then
+        info "Node.js dependencies missing — auto-installing..."
+        (cd "$CRUX_DIR" && npm install 2>/dev/null) || true
+    fi
     if [ -d "$CRUX_DIR/node_modules/zod" ]; then
         success "Node.js dependencies installed (zod)"
         checks_passed=$((checks_passed + 1))
@@ -1331,22 +1407,18 @@ final_summary() {
     echo "  scripts/lib → $CRUX_DIR/scripts/lib/"
     echo ""
 
-    echo -e "${BOLD}Available Modes (15 total):${NC}"
-    echo "  1. build-py         - Python development (security-first)"
-    echo "  2. build-ex         - Elixir/Phoenix development"
-    echo "  3. plan             - Software architecture planning"
-    echo "  4. infra-architect  - Infrastructure & deployment design"
-    echo "  5. review           - Code review (security priority)"
-    echo "  6. debug            - Root cause analysis & debugging"
-    echo "  7. explain          - Teaching & mentoring"
-    echo "  8. analyst          - Data analysis with code"
-    echo "  9. writer           - Professional writing"
-    echo " 10. psych            - Psychological reflection (ACT/Attachment/Shadow)"
-    echo " 11. legal            - Legal research (not advice)"
-    echo " 12. strategist       - First principles strategic thinking"
-    echo " 13. ai-infra         - LLM infrastructure optimization"
-    echo " 14. mac              - macOS systems & troubleshooting"
-    echo " 15. docker           - Containers & infrastructure"
+    local mode_count
+    mode_count=$(ls -1 "$config_dir/modes"/*.md 2>/dev/null | grep -v '_template' | wc -l | tr -d ' ')
+    echo -e "${BOLD}Available Modes ($mode_count total):${NC}"
+    local i=1
+    for mode_file in "$config_dir/modes"/*.md; do
+        [ -f "$mode_file" ] || continue
+        local basename
+        basename=$(basename "$mode_file" .md)
+        [ "$basename" = "_template" ] && continue
+        printf "  %2d. %s\n" "$i" "$basename"
+        i=$((i + 1))
+    done
     echo ""
 
     echo -e "${BOLD}Custom Commands (11 total):${NC}"

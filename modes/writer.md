@@ -1,3 +1,13 @@
+---
+temperature: 0.7
+mode: primary
+description: Professional technical writing
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+  webfetch: deny
+---
 # Mode: writer
 
 Professional writing and communication.

@@ -1,3 +1,12 @@
+---
+temperature: 0.4
+mode: primary
+description: Python development specialist
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: build-py
 
 Python development with security and quality as core principles.

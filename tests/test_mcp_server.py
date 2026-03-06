@@ -28,6 +28,7 @@ from scripts.lib.crux_mcp_handlers import (
     handle_switch_tool,
     handle_list_modes,
     handle_log_correction,
+    handle_restore_context,
 )
 
 
@@ -482,3 +483,87 @@ class TestEdgeCases:
         result = handle_validate_script(content=script)
         assert not result["passed"]
         assert any("Description" in e for e in result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# restore_context
+# ---------------------------------------------------------------------------
+
+class TestRestoreContext:
+    def test_returns_context_string(self, env):
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "context" in result
+        assert isinstance(result["context"], str)
+        assert len(result["context"]) > 0
+
+    def test_includes_active_mode(self, env):
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        # Default mode is build-py (from session fixture)
+        assert "build-py" in result["context"] or "debug" in result["context"]
+
+    def test_includes_working_on(self, env):
+        from scripts.lib.crux_session import update_session
+        crux_dir = os.path.join(env["project"], ".crux")
+        update_session(crux_dir, working_on="Fixing auth bug in login flow")
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "Fixing auth bug" in result["context"]
+
+    def test_includes_key_decisions(self, env):
+        from scripts.lib.crux_session import update_session
+        crux_dir = os.path.join(env["project"], ".crux")
+        update_session(crux_dir, add_decision="Use JWT for auth")
+        update_session(crux_dir, add_decision="PostgreSQL for persistence")
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "JWT" in result["context"]
+        assert "PostgreSQL" in result["context"]
+
+    def test_includes_pending_tasks(self, env):
+        from scripts.lib.crux_session import update_session
+        crux_dir = os.path.join(env["project"], ".crux")
+        update_session(crux_dir, add_pending="Write API tests")
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "Write API tests" in result["context"]
+
+    def test_includes_files_touched(self, env):
+        from scripts.lib.crux_session import update_session
+        crux_dir = os.path.join(env["project"], ".crux")
+        update_session(crux_dir, add_file="src/auth.py")
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "src/auth.py" in result["context"]
+
+    def test_includes_handoff_when_present(self, env):
+        from scripts.lib.crux_session import write_handoff
+        crux_dir = os.path.join(env["project"], ".crux")
+        write_handoff("Switching to plan mode for API design", project_crux_dir=crux_dir)
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "API design" in result["context"]
+
+    def test_excludes_handoff_when_absent(self, env):
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "Handoff" not in result["context"]
+
+    def test_includes_mode_prompt(self, env):
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        # The env fixture creates build-py.md and debug.md mode files
+        # Session state has active_mode from save_session
+        assert "specialist" in result["context"].lower() or "Mode" in result["context"]
+
+    def test_empty_session_still_returns_context(self, tmp_path):
+        """Fresh project with no session state should return minimal context."""
+        from scripts.lib.crux_init import init_project, init_user
+        home = tmp_path / "home"
+        project = tmp_path / "project"
+        home.mkdir()
+        project.mkdir()
+        init_user(home=str(home))
+        init_project(project_dir=str(project))
+        result = handle_restore_context(project_dir=str(project), home=str(home))
+        assert "context" in result
+        assert "Mode:" in result["context"]
+
+    def test_includes_context_summary(self, env):
+        from scripts.lib.crux_session import update_session
+        crux_dir = os.path.join(env["project"], ".crux")
+        update_session(crux_dir, context_summary="Building Crux hooks system for TDD enforcement")
+        result = handle_restore_context(project_dir=env["project"], home=env["home"])
+        assert "TDD enforcement" in result["context"]

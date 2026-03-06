@@ -54,7 +54,28 @@ setup() {
         fi
     }
 
-    export -f state_mark state_done state_save state_read select_model_quantization
+    ask_choice() {
+        local prompt="$1"
+        shift
+        local choices=("$@")
+        local response
+
+        echo -e "\n${BOLD}$prompt${NC}" >&2
+        for i in "${!choices[@]}"; do
+            echo "  $((i+1)). ${choices[$i]}" >&2
+        done
+
+        while true; do
+            read -p "$(echo -e "${BOLD}Enter choice (1-${#choices[@]}):${NC}") " response
+            if [[ "$response" =~ ^[0-9]+$ ]] && [ "$response" -ge 1 ] && [ "$response" -le ${#choices[@]} ]; then
+                echo "$((response-1))"
+                return 0
+            fi
+            echo "Invalid choice. Please enter a number between 1 and ${#choices[@]}." >&2
+        done
+    }
+
+    export -f state_mark state_done state_save state_read select_model_quantization ask_choice
 }
 
 teardown() {
@@ -170,6 +191,41 @@ teardown() {
     [ "$(state_read 'chip_model')" = "M1" ]
     run state_done "hardware_detected"
     [ "$status" -eq 0 ]
+}
+
+# =========================================================================
+# ask_choice tests
+# =========================================================================
+
+@test "ask_choice returns 0-indexed value for first option" {
+    result=$(echo "1" | ask_choice "Pick:" "Alpha" "Beta" "Gamma")
+    [ "$result" = "0" ]
+}
+
+@test "ask_choice returns 0-indexed value for last option" {
+    result=$(echo "3" | ask_choice "Pick:" "Alpha" "Beta" "Gamma")
+    [ "$result" = "2" ]
+}
+
+@test "ask_choice stdout contains only the index" {
+    # This is the critical test: stdout must be ONLY the return value,
+    # not the menu text (which goes to stderr). If the menu leaks to stdout,
+    # variable capture like model_choice=$(ask_choice ...) breaks.
+    result=$(echo "2" | ask_choice "Pick:" "Alpha" "Beta" "Gamma")
+    [ "$result" = "1" ]
+    # Verify no extra lines
+    line_count=$(echo "2" | ask_choice "Pick:" "Alpha" "Beta" | wc -l | tr -d ' ')
+    [ "$line_count" = "1" ]
+}
+
+@test "ask_choice menu goes to stderr not stdout" {
+    # Capture only stdout — should be just the index
+    stdout=$(echo "1" | ask_choice "Pick:" "Alpha" "Beta" 2>/dev/null)
+    [ "$stdout" = "0" ]
+    # Capture only stderr — should contain the menu
+    stderr=$(echo "1" | ask_choice "Pick:" "Alpha" "Beta" 2>&1 1>/dev/null)
+    [[ "$stderr" == *"Alpha"* ]]
+    [[ "$stderr" == *"Beta"* ]]
 }
 
 @test "multiple steps can be tracked independently" {
