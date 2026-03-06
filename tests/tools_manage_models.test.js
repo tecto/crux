@@ -76,10 +76,13 @@ describe('manage_models.js implementation', () => {
     assert.ok(result.error.includes('not in registry'));
   });
 
-  it('pull returns pending status', async () => {
+  it('pull attempts Ollama pull and handles unavailability', async () => {
     const mod = await import(TOOLS_DIR + '/manage_models.js?pull=' + Date.now());
     const result = await mod.default.execute({ action: 'pull', model: 'llama3:8b' });
-    assert.equal(result.status, 'pending');
+    // Either completed (if Ollama running) or failed (if not)
+    assert.ok(['completed', 'failed'].includes(result.status));
+    assert.equal(result.action, 'pull');
+    assert.equal(result.model, 'llama3:8b');
   });
 
   it('requires model for pull/configure/switch', async () => {

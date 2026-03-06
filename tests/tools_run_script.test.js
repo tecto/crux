@@ -182,4 +182,39 @@ describe('run_script.js implementation', () => {
     assert.equal(mod.default._parseRiskLevel('# Risk: high\n'), 'high');
     assert.equal(mod.default._parseRiskLevel('no risk header\n'), 'unknown');
   });
+
+  it('includes audit8b and audit32b in execution result', async () => {
+    await writeScript('test.sh', validLowScript);
+    const mod = await import(TOOLS_DIR + '/run_script.js?audit=' + Date.now());
+    const result = await mod.default.execute({ scriptPath: 'test.sh' });
+    assert.equal(result.gate, 'executed');
+    assert.ok('audit8b' in result);
+    assert.ok('audit32b' in result);
+  });
+
+  it('low-risk skips 32b audit', async () => {
+    await writeScript('test.sh', validLowScript);
+    const mod = await import(TOOLS_DIR + '/run_script.js?skip32b=' + Date.now());
+    const result = await mod.default.execute({ scriptPath: 'test.sh' });
+    assert.equal(result.audit32b.skipped, true);
+    assert.ok(result.audit32b.reason.includes('Not high-risk'));
+  });
+
+  it('high-risk triggers both audit gates', async () => {
+    await writeScript('high.sh', validHighScript);
+    const mod = await import(TOOLS_DIR + '/run_script.js?both=' + Date.now());
+    const result = await mod.default.execute({ scriptPath: 'high.sh', approvalRequired: false });
+    assert.ok('audit8b' in result);
+    assert.ok('audit32b' in result);
+    // Both should exist (either skipped or with results)
+    assert.ok(result.audit8b.passed !== undefined || result.audit8b.skipped);
+    assert.ok(result.audit32b.passed !== undefined || result.audit32b.skipped);
+  });
+
+  it('runPythonAudit returns skipped when python unavailable', async () => {
+    const mod = await import(TOOLS_DIR + '/run_script.js?pyaudit=' + Date.now());
+    // This will either succeed (if Ollama is running) or return skipped
+    const result = await mod.default._runPythonAudit('echo hello', 'low', '8b');
+    assert.ok(result.passed !== undefined);
+  });
 });

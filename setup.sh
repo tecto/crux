@@ -703,14 +703,58 @@ install_agents_md() {
 
     local config_dir="$HOME/.config/opencode"
     local source_file="$CRUX_DIR/templates/AGENTS.md"
+    local target_file="$config_dir/AGENTS.md"
+    local start_marker="<!-- CRUX:START -->"
+    local end_marker="<!-- CRUX:END -->"
 
     if [ ! -f "$source_file" ]; then
         error "AGENTS.md template not found at $source_file"
         return 1
     fi
 
-    safe_symlink "$source_file" "$config_dir/AGENTS.md"
-    success "Linked AGENTS.md from repo"
+    mkdir -p "$config_dir"
+    local crux_section="${start_marker}
+$(cat "$source_file")
+${end_marker}"
+
+    # Convert legacy symlink to regular file
+    if [ -L "$target_file" ]; then
+        local existing
+        existing="$(cat "$target_file" 2>/dev/null || true)"
+        rm "$target_file"
+        # If it was just our template, start fresh with delimiters
+        if [ -z "$existing" ]; then
+            echo "$crux_section" > "$target_file"
+            success "Merged AGENTS.md (converted from symlink)"
+            return 0
+        fi
+    fi
+
+    if [ ! -f "$target_file" ]; then
+        echo "$crux_section" > "$target_file"
+        success "Created AGENTS.md with Crux section"
+        return 0
+    fi
+
+    # File exists — merge
+    if grep -q "$start_marker" "$target_file" 2>/dev/null; then
+        # Replace existing Crux section using Python for reliable multiline replace
+        python3 -c "
+import sys
+content = open('$target_file').read()
+start = content.index('$start_marker')
+end = content.index('$end_marker') + len('$end_marker')
+if end < len(content) and content[end] == '\n':
+    end += 1
+updated = content[:start] + sys.stdin.read() + content[end:]
+open('$target_file', 'w').write(updated)
+" <<< "$crux_section"
+        success "Updated Crux section in AGENTS.md (preserved user content)"
+    else
+        # Append Crux section
+        printf "\n%s\n" "$crux_section" >> "$target_file"
+        success "Appended Crux section to existing AGENTS.md (preserved user content)"
+    fi
 }
 
 ###############################################################################
@@ -1313,8 +1357,8 @@ verify_installation() {
 
     # Check AGENTS.md
     checks_total=$((checks_total + 1))
-    if [ -e "$config_dir/AGENTS.md" ]; then
-        success "AGENTS.md framework linked"
+    if [ -e "$config_dir/AGENTS.md" ] && grep -q "CRUX:START" "$config_dir/AGENTS.md" 2>/dev/null; then
+        success "AGENTS.md contains Crux section"
         checks_passed=$((checks_passed + 1))
     else
         error "AGENTS.md not found"

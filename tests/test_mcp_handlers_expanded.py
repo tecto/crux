@@ -17,6 +17,16 @@ from scripts.lib.crux_mcp_handlers import (
     handle_design_validation_summary,
     handle_check_contrast,
     handle_log_interaction,
+    handle_verify_health,
+    handle_audit_script_8b,
+    handle_audit_script_32b,
+    handle_check_processor_thresholds,
+    handle_run_background_processors,
+    handle_get_processor_status,
+    handle_register_project,
+    handle_get_cross_project_digest,
+    handle_figma_get_tokens,
+    handle_figma_get_components,
 )
 from scripts.lib.crux_session import SessionState, save_session
 
@@ -279,3 +289,105 @@ class TestHandleLogInteraction:
         with open(os.path.join(log_dir, log_files[0])) as f:
             entry = json.loads(f.readline())
         assert entry["metadata"] == {"source": "opencode-mcp"}
+
+
+class TestHandleVerifyHealth:
+    def test_returns_static_liveness_summary(self, env):
+        result = handle_verify_health(project_dir=env["project"], home=env["home"])
+        assert "static" in result
+        assert "liveness" in result
+        assert "summary" in result
+
+    def test_summary_has_counts(self, env):
+        result = handle_verify_health(project_dir=env["project"], home=env["home"])
+        s = result["summary"]
+        assert "total" in s
+        assert "passed" in s
+        assert "failed" in s
+        assert "all_passed" in s
+        assert s["total"] == s["passed"] + s["failed"]
+
+
+# ---------------------------------------------------------------------------
+# Audit script handlers
+# ---------------------------------------------------------------------------
+
+class TestAuditScriptHandlers:
+    def test_audit_8b_returns_dict(self):
+        result = handle_audit_script_8b("echo hello", "low")
+        assert isinstance(result, dict)
+        assert "passed" in result
+
+    def test_audit_32b_skips_non_high_risk(self):
+        result = handle_audit_script_32b("echo hello", "low")
+        assert result["passed"] is True
+        assert result.get("skipped") is True
+
+
+# ---------------------------------------------------------------------------
+# Background processor handlers
+# ---------------------------------------------------------------------------
+
+class TestProcessorHandlers:
+    def test_check_thresholds(self, env):
+        result = handle_check_processor_thresholds(
+            project_dir=env["project"], home=env["home"],
+        )
+        assert "corrections_exceeded" in result
+        assert "interactions_exceeded" in result
+
+    def test_run_processors_nothing_due(self, env):
+        result = handle_run_background_processors(
+            project_dir=env["project"], home=env["home"],
+        )
+        assert result["success"] is True
+        assert len(result["processors_run"]) == 0
+
+    def test_get_processor_status(self, env):
+        result = handle_get_processor_status(project_dir=env["project"])
+        assert "last_digest" in result
+        assert result["last_digest"] == "never"
+
+
+# ---------------------------------------------------------------------------
+# Cross-project handlers
+# ---------------------------------------------------------------------------
+
+class TestCrossProjectHandlers:
+    def test_register_project(self, env):
+        result = handle_register_project(
+            project_dir=env["project"], home=env["home"],
+        )
+        assert result["registered"] is True
+
+    def test_get_cross_project_digest(self, env):
+        result = handle_get_cross_project_digest(home=env["home"])
+        assert "date" in result
+        assert "content" in result
+
+
+# ---------------------------------------------------------------------------
+# Figma handlers
+# ---------------------------------------------------------------------------
+
+class TestFigmaHandlers:
+    def test_figma_get_tokens_error(self):
+        # No mock — will fail to connect to Figma
+        result = handle_figma_get_tokens("fake-key", "fake-token")
+        assert result["success"] is False
+
+    def test_figma_get_components_error(self):
+        result = handle_figma_get_components("fake-key", "fake-token")
+        assert result["success"] is False
+
+    def test_figma_get_tokens_success(self, monkeypatch):
+        import scripts.lib.crux_figma as figma_mod
+        monkeypatch.setattr(figma_mod, "get_file", lambda fk, t: {
+            "success": True,
+            "data": {"document": {"name": "test", "type": "CANVAS", "children": []}},
+        })
+        result = handle_figma_get_tokens("test-key", "test-token")
+        assert result["success"] is True
+        assert "tokens" in result
+        assert "css" in result
+        assert "tailwind" in result

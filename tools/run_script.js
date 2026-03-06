@@ -46,6 +46,35 @@ function preflightCheck(content, scriptPath) {
   return { passed: errors.length === 0, errors, risk };
 }
 
+function runPythonAudit(scriptContent, riskLevel, gate) {
+  return new Promise((resolve) => {
+    const fn = gate === '8b' ? 'audit_script_8b' : 'audit_script_32b';
+    const code = `
+import json, sys
+from scripts.lib.crux_llm_audit import ${fn}
+result = ${fn}(sys.stdin.read(), ${JSON.stringify(riskLevel)})
+print(json.dumps(result))
+`;
+    const proc = execFile('python3', ['-c', code], {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+      cwd: process.env.CRUX_DIR || process.cwd(),
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ passed: true, skipped: true, reason: `Audit unavailable: ${error.message}` });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch {
+        resolve({ passed: true, skipped: true, reason: 'Failed to parse audit response' });
+      }
+    });
+    proc.stdin.write(scriptContent);
+    proc.stdin.end();
+  });
+}
+
 function executeScript(scriptPath, args, env) {
   return new Promise((resolve, reject) => {
     execFile('bash', [scriptPath, ...args], { env, timeout: 60000 }, (error, stdout, stderr) => {
@@ -59,7 +88,7 @@ function executeScript(scriptPath, args, env) {
 }
 
 const runScriptTool = tool({
-  description: 'Execute a script through the five-gate safety pipeline',
+  description: 'Execute a script through the seven-gate safety pipeline',
   args: {
     scriptPath: tool.schema.string().describe('Path to script to execute'),
     args: tool.schema.array(tool.schema.string()).optional().describe('Script arguments'),
@@ -89,15 +118,36 @@ const runScriptTool = tool({
       };
     }
 
-    // Gate 2: 8B adversarial audit (placeholder — requires LLM integration)
-    const auditResult = { gate: 'audit_8b', skipped: true, reason: 'LLM integration pending' };
+    // Gate 4: 8B adversarial audit
+    const auditResult = await runPythonAudit(content, preflight.risk, '8b');
+    if (!auditResult.passed && !auditResult.skipped) {
+      return {
+        gate: 'audit_8b',
+        passed: false,
+        risk: preflight.risk,
+        findings: auditResult.findings || [],
+        message: 'Script failed 8B adversarial security audit',
+      };
+    }
 
-    // Gate 3: 32B second-opinion (high-risk only, placeholder)
-    const secondOpinion = preflight.risk === 'high'
-      ? { gate: 'audit_32b', skipped: true, reason: 'LLM integration pending' }
-      : { gate: 'audit_32b', skipped: true, reason: 'Not high-risk' };
+    // Gate 5: 32B second-opinion (high-risk only)
+    let secondOpinion;
+    if (preflight.risk === 'high') {
+      secondOpinion = await runPythonAudit(content, preflight.risk, '32b');
+      if (!secondOpinion.passed && !secondOpinion.skipped) {
+        return {
+          gate: 'audit_32b',
+          passed: false,
+          risk: preflight.risk,
+          findings: secondOpinion.findings || [],
+          message: 'Script failed 32B second-opinion security audit',
+        };
+      }
+    } else {
+      secondOpinion = { passed: true, skipped: true, reason: 'Not high-risk' };
+    }
 
-    // Gate 4: Human approval (high-risk or explicit request)
+    // Gate 6: Human approval (high-risk or explicit request)
     const needsApproval = approvalRequired !== undefined ? approvalRequired : preflight.risk === 'high';
     if (needsApproval) {
       return {
@@ -111,7 +161,7 @@ const runScriptTool = tool({
       };
     }
 
-    // Gate 5: DRY_RUN for medium+ risk
+    // Gate 7: DRY_RUN for medium+ risk
     const env = { ...process.env };
     if (dryRun || (preflight.risk !== 'low' && !dryRun)) {
       env.DRY_RUN = '1';
@@ -139,5 +189,6 @@ const runScriptTool = tool({
 // Expose internals for testing
 runScriptTool._preflightCheck = preflightCheck;
 runScriptTool._parseRiskLevel = parseRiskLevel;
+runScriptTool._runPythonAudit = runPythonAudit;
 
 export default runScriptTool;

@@ -92,6 +92,24 @@ class TestHandleSessionStart:
         )
         assert "Python specialist" in result["context"]
 
+    def test_auto_sets_active_tool_to_claude_code(self, env):
+        from scripts.lib.crux_hooks import handle_session_start
+
+        # Start with a different tool
+        state = load_session(env["crux_dir"])
+        state.active_tool = "opencode"
+        save_session(state, project_crux_dir=env["crux_dir"])
+
+        handle_session_start(
+            event_data={"source": "startup"},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+
+        # Session should now say claude-code
+        updated = load_session(env["crux_dir"])
+        assert updated.active_tool == "claude-code"
+
     def test_includes_key_decisions(self, env):
         from scripts.lib.crux_hooks import handle_session_start
 
@@ -486,6 +504,23 @@ class TestUserPromptConversationLogging:
             entry = json.loads(f.readline())
         assert entry["tool"] == "claude-code"
 
+    def test_logs_include_metadata_when_provided(self, env):
+        from scripts.lib.crux_hooks import _log_conversation
+
+        _log_conversation(
+            role="user",
+            content="test with metadata",
+            project_dir=env["project"],
+            mode="build-py",
+            tool="claude-code",
+            metadata={"source": "test"},
+        )
+        log_dir = os.path.join(env["project"], ".crux", "analytics", "conversations")
+        log_files = os.listdir(log_dir)
+        with open(os.path.join(log_dir, log_files[0])) as f:
+            entry = json.loads(f.readline())
+        assert entry["metadata"] == {"source": "test"}
+
     def test_multiple_messages_append_to_same_file(self, env):
         from scripts.lib.crux_hooks import handle_user_prompt
 
@@ -873,6 +908,95 @@ class TestCheckTddCompliance:
 
         result = check_tdd_compliance(["bin/crux"])
         assert "tests/crux_cli.bats" in result["expected_tests"]
+
+
+# ---------------------------------------------------------------------------
+# Background processor integration
+# ---------------------------------------------------------------------------
+
+class TestHandleStopBackgroundProcessor:
+    def test_stop_triggers_processor_when_thresholds_met(self, env):
+        from scripts.lib.crux_hooks import handle_stop, handle_post_tool_use
+
+        # Write enough corrections to exceed threshold (default 10)
+        corr_dir = os.path.join(env["project"], ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            for i in range(15):
+                f.write(json.dumps({"original": f"bad{i}", "corrected": f"good{i}",
+                                    "category": "style", "mode": "build-py",
+                                    "timestamp": "2026-03-06T01:00:00Z"}) + "\n")
+
+        result = handle_stop(
+            event_data={},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+        assert "processors_run" in result
+        assert len(result["processors_run"]) > 0
+
+    def test_stop_skips_processor_when_below_thresholds(self, env):
+        from scripts.lib.crux_hooks import handle_stop
+
+        result = handle_stop(
+            event_data={},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+        assert "processors_run" not in result
+
+    def test_processor_failure_doesnt_break_stop(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import handle_stop
+        import scripts.lib.crux_background_processor as bp
+        monkeypatch.setattr(bp, "should_process", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+        result = handle_stop(
+            event_data={},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+        assert "processors_run" not in result
+
+
+class TestPostToolUsePeriodicProcessor:
+    def test_triggers_processor_at_interval(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        import scripts.lib.crux_hooks as hooks_mod
+
+        # Write corrections to exceed threshold
+        corr_dir = os.path.join(env["project"], ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            for i in range(15):
+                f.write(json.dumps({"original": f"bad{i}", "corrected": f"good{i}",
+                                    "category": "style", "mode": "build-py",
+                                    "timestamp": "2026-03-06T01:00:00Z"}) + "\n")
+
+        # Mock _count_interactions to return exactly the interval
+        monkeypatch.setattr(hooks_mod, "_count_interactions", lambda pd: 50)
+
+        result = handle_post_tool_use(
+            event_data={"tool_name": "Bash", "tool_input": {"command": "echo"}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert "processors_run" in result
+
+    def test_no_trigger_between_intervals(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        import scripts.lib.crux_hooks as hooks_mod
+
+        monkeypatch.setattr(hooks_mod, "_count_interactions", lambda pd: 25)
+
+        result = handle_post_tool_use(
+            event_data={"tool_name": "Bash", "tool_input": {"command": "echo"}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert "processors_run" not in result
 
 
 class TestHandleStopTddCheck:

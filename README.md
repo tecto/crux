@@ -49,11 +49,13 @@ User-level configuration shared across all projects: mode definitions, shared kn
 Crux generates tool-specific configuration from `.crux/` data:
 - **Claude Code**: `.claude/agents/` with mode-specific frontmatter, `.claude/rules/` from knowledge entries, hooks for interaction logging and correction detection
 - **OpenCode**: Symlinks to `~/.config/opencode/` for modes, agents, and knowledge
-- **MCP Server**: 24-tool FastMCP server accessible from any MCP-compatible client
+- **Cursor**: `.cursor/rules/` with plain markdown rules, `.cursor/mcp.json` for MCP registration
+- **Windsurf**: `.windsurf/rules/` with plain markdown rules, `.windsurf/mcp.json` for MCP registration
+- **MCP Server**: 34-tool FastMCP server accessible from any MCP-compatible client
 
 ## The MCP Server
 
-Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 24 tools:
+Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 34 tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -73,12 +75,18 @@ Crux exposes its capabilities via the Model Context Protocol, making them availa
 | `validate_script` | Script safety convention checking |
 | `promote_knowledge` | Promote knowledge project → user scope |
 | `get_project_context` / `get_digest` | Project and analytics access |
+| `verify_health` | Full static + liveness health check report |
+| `audit_script_8b` / `audit_script_32b` | LLM-based adversarial script auditing (Gates 4-5) |
+| `check_processor_thresholds` / `run_background_processors` | Threshold-triggered continuous learning |
+| `get_processor_status` | Background processor run history |
+| `register_project` / `get_cross_project_digest` | Cross-project analytics aggregation |
+| `figma_get_tokens` / `figma_get_components` | Figma design token extraction |
 
 ## What Crux Is Not
 
 **It is not tied to any specific LLM.** Crux works with Qwen, Llama, Claude, GPT, Gemini, or any model that supports tool use. The architecture is model-agnostic.
 
-**It is not tied to any specific agentic tool.** Current adapters support OpenCode and Claude Code, with the MCP server accessible from any MCP-compatible client. Modes, knowledge, scripts, and learning data are tool-independent files on disk.
+**It is not tied to any specific agentic tool.** Current adapters support OpenCode, Claude Code, Cursor, and Windsurf, with the MCP server accessible from any MCP-compatible client. Modes, knowledge, scripts, and learning data are tool-independent files on disk.
 
 **It is not just for code.** Twenty-three built-in modes span coding, architecture, debugging, testing, security analysis, design (UI, systems, accessibility, responsive), data analysis, writing, psychological reflection, legal research, business strategy, AI infrastructure, and systems administration.
 
@@ -141,19 +149,24 @@ crux/
 ├── bin/crux                    # CLI wrapper (setup, update, doctor, adopt)
 ├── .crux/                      # Project-level Crux data (sessions, analytics, knowledge)
 ├── scripts/
-│   └── lib/                    # 27 Python modules (stdlib + mcp dependency)
-│       ├── crux_mcp_server.py  # 24-tool FastMCP server
+│   └── lib/                    # 32 Python modules (stdlib + mcp dependency)
+│       ├── crux_mcp_server.py  # 34-tool FastMCP server
 │       ├── crux_mcp_handlers.py# Pure handler functions (no MCP deps)
 │       ├── crux_hooks.py       # Claude Code hook handlers
 │       ├── crux_session.py     # Session state management
-│       ├── crux_sync.py        # Tool adapter layer (OpenCode, Claude Code)
+│       ├── crux_sync.py        # Tool adapter layer (OpenCode, Claude Code, Cursor, Windsurf)
 │       ├── crux_switch.py      # Tool switching with config sync
 │       ├── crux_adopt.py       # Mid-session project onboarding
 │       ├── crux_tdd_gate.py    # TDD/BDD enforcement gate
 │       ├── crux_security_audit.py # Recursive security audit engine
 │       ├── crux_design_validation.py # WCAG, contrast, touch targets
 │       ├── crux_pipeline_config.py   # Gate activation per mode/risk
-│       ├── crux_cross_domain.py      # Cross-domain knowledge flows
+│       ├── crux_ollama.py            # Ollama REST API client (stdlib only)
+│       ├── crux_llm_audit.py        # LLM-based script auditing (Gates 4-5)
+│       ├── crux_background_processor.py # Threshold-triggered continuous learning
+│       ├── crux_cross_project.py    # Cross-project analytics aggregation
+│       ├── crux_figma.py            # Figma API client (design tokens)
+│       ├── crux_cross_domain.py     # Cross-domain knowledge flows
 │       ├── crux_design_handoff.py    # Design-to-code handoff
 │       ├── crux_knowledge_categories.py # Structured KB taxonomy
 │       ├── extract_corrections.py    # Correction clustering
@@ -186,7 +199,7 @@ crux/
 ├── templates/                  # AGENTS.md, PROJECT.md, opencode.json
 ├── knowledge/                  # Knowledge base template
 ├── docs/                       # Architecture, modes, safety, learning docs
-├── tests/                      # 873+ tests (pytest + node:test + bats)
+├── tests/                      # 1480+ tests (pytest + node:test + bats)
 ├── CONTRIBUTING.md
 ├── LICENSE                     # MIT
 └── README.md
@@ -238,18 +251,18 @@ crux/
 | 1 | Pre-flight validation | `preflight_validator.py` — structural checks, risk classification |
 | 2 | TDD/BDD enforcement | `crux_tdd_gate.py` — red/green phase tracking, coverage |
 | 3 | Recursive security audit | `crux_security_audit.py` — 7 categories, convergence detection |
-| 4 | 8B adversarial audit | `run_script.js` — separate model reviews (stub, pending LLM integration) |
-| 5 | 32B second opinion | `run_script.js` — high-risk only (stub, pending LLM integration) |
+| 4 | 8B adversarial audit | `crux_llm_audit.py` + `run_script.js` — separate model reviews via Ollama |
+| 5 | 32B second opinion | `crux_llm_audit.py` + `run_script.js` — high-risk only, larger model review |
 | 6 | Human approval | `run_script.js` — required for high-risk scripts |
 | 7 | DRY_RUN execution | `run_script.js` — safe preview for medium+ risk |
 
 ## Test Suite
 
-873+ tests across three frameworks:
+1480+ tests across three frameworks:
 
-- **Python (pytest)**: 27 test files covering all Python modules with 100% coverage enforced
-- **JavaScript (node:test)**: 6 test files covering plugins and tools
-- **Bash (bats)**: 5 test files covering setup, CLI, and repo structure
+- **Python (pytest)**: 1070+ tests across 30+ test files covering all Python modules with 100% coverage enforced
+- **JavaScript (node:test)**: 199 tests covering plugins and tools
+- **Bash (bats)**: 213 tests covering setup, CLI, and repo structure
 
 ## Contributing
 

@@ -1,6 +1,7 @@
 import { tool } from '../lib/plugin-shim.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { execFile } from 'child_process';
 
 const REGISTRY_PATH_PROJECT = '.crux/models/registry.json';
 const REGISTRY_PATH_USER = '.crux/models/registry.json';
@@ -65,6 +66,61 @@ async function switchModel(registry, registryPath, model) {
   return { switched: model, active: model };
 }
 
+function pullModelViaOllama(modelName) {
+  return new Promise((resolve) => {
+    const code = `
+import json
+from scripts.lib.crux_ollama import pull_model
+result = pull_model(${JSON.stringify(modelName)})
+print(json.dumps(result))
+`;
+    execFile('python3', ['-c', code], {
+      timeout: 300000,  // 5 min for large model pulls
+      maxBuffer: 1024 * 1024,
+      cwd: process.env.CRUX_DIR || process.cwd(),
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({
+          success: false,
+          error: `Ollama pull failed: ${error.message}`,
+          model: modelName,
+        });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch {
+        resolve({ success: false, error: 'Failed to parse Ollama response', model: modelName });
+      }
+    });
+  });
+}
+
+async function pullModel(registry, registryPath, model, quantization) {
+  // Pull from Ollama
+  const pullResult = await pullModelViaOllama(model);
+
+  if (pullResult.success) {
+    // Auto-configure in registry after successful pull
+    await configureModel(registry, registryPath, model, quantization);
+    return {
+      action: 'pull',
+      model,
+      status: 'completed',
+      pull_result: pullResult,
+      registered: true,
+    };
+  }
+
+  return {
+    action: 'pull',
+    model,
+    status: 'failed',
+    error: pullResult.error || 'Pull failed',
+    message: 'Ollama may not be running. Start it with: ollama serve',
+  };
+}
+
 export default tool({
   description: 'Manage model registry and configuration',
   args: {
@@ -82,12 +138,7 @@ export default tool({
 
       case 'pull':
         if (!model) return { error: 'Model name required for pull action' };
-        return {
-          action: 'pull',
-          model,
-          status: 'pending',
-          message: 'Ollama API integration pending. Add model to registry with configure action.',
-        };
+        return pullModel(registry, registryPath, model, quantization);
 
       case 'configure':
         if (!model) return { error: 'Model name required for configure action' };

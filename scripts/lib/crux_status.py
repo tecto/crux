@@ -23,6 +23,8 @@ from pathlib import Path
 from scripts.lib.crux_paths import get_project_paths, get_user_paths
 from scripts.lib.crux_session import load_session
 
+REQUIRED_HOOKS = {"SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"}
+
 
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -338,3 +340,421 @@ def check_health(project_dir: str, home: str) -> list[dict]:
     })
 
     return checks
+
+
+# ---------------------------------------------------------------------------
+# check_liveness — runtime verification that components are actually working
+# ---------------------------------------------------------------------------
+
+def check_liveness(project_dir: str, home: str) -> list[dict]:
+    """Run liveness checks that verify components are producing data at runtime."""
+    project_paths = get_project_paths(project_dir)
+    crux_dir = str(project_paths.root)
+    checks: list[dict] = []
+
+    # --- Hook completeness ---
+    settings_path = os.path.join(project_dir, ".claude", "settings.local.json")
+    settings = _load_json_safe(settings_path)
+    hooks = settings.get("hooks", {})
+    registered_events = {k for k, v in hooks.items() if v}
+    missing = REQUIRED_HOOKS - registered_events
+    if not registered_events:
+        checks.append({
+            "name": "Hook completeness",
+            "passed": False,
+            "message": f"No hooks configured. Required: {', '.join(sorted(REQUIRED_HOOKS))}",
+        })
+    elif missing:
+        checks.append({
+            "name": "Hook completeness",
+            "passed": False,
+            "message": f"Missing hooks: {', '.join(sorted(missing))}",
+        })
+    else:
+        checks.append({
+            "name": "Hook completeness",
+            "passed": True,
+            "message": f"All {len(REQUIRED_HOOKS)} required hooks registered",
+        })
+
+    # --- Conversation logging ---
+    today = _today()
+    conv_dir = os.path.join(crux_dir, "analytics", "conversations")
+    conv_file = os.path.join(conv_dir, f"{today}.jsonl")
+    has_conversations = os.path.exists(conv_file) and os.path.getsize(conv_file) > 0
+    checks.append({
+        "name": "Conversation logging",
+        "passed": has_conversations,
+        "message": "Today's conversation log exists" if has_conversations else "No conversation log for today",
+    })
+
+    # --- Log consistency ---
+    int_dir = os.path.join(crux_dir, "analytics", "interactions")
+    int_file = os.path.join(int_dir, f"{today}.jsonl")
+    has_interactions = os.path.exists(int_file) and os.path.getsize(int_file) > 0
+    if has_interactions and not has_conversations:
+        checks.append({
+            "name": "Log consistency",
+            "passed": False,
+            "message": "Interactions logged but no conversations — UserPromptSubmit hook may be broken",
+        })
+    else:
+        checks.append({
+            "name": "Log consistency",
+            "passed": True,
+            "message": "Interaction and conversation logs are consistent",
+        })
+
+    # --- MCP server loadable ---
+    try:
+        from scripts.lib.crux_mcp_server import mcp as mcp_server
+        tool_count = len(mcp_server._tool_manager._tools)
+        checks.append({
+            "name": "MCP loadable",
+            "passed": True,
+            "message": f"MCP server loaded with {tool_count} tools",
+        })
+    except Exception as exc:
+        checks.append({
+            "name": "MCP loadable",
+            "passed": False,
+            "message": f"MCP server failed to load: {exc}",
+        })
+
+    # --- Session freshness ---
+    session = load_session(crux_dir)
+    try:
+        updated = datetime.strptime(session.updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - updated).total_seconds() / 3600
+        if age_hours > 24:
+            checks.append({
+                "name": "Session freshness",
+                "passed": False,
+                "message": f"Session is stale — last updated {age_hours:.0f} hours ago",
+            })
+        else:
+            checks.append({
+                "name": "Session freshness",
+                "passed": True,
+                "message": f"Session updated {age_hours:.1f} hours ago",
+            })
+    except (ValueError, AttributeError):
+        checks.append({
+            "name": "Session freshness",
+            "passed": False,
+            "message": "Could not parse session updated_at timestamp",
+        })
+
+    # --- Hook command valid ---
+    if not registered_events:
+        checks.append({
+            "name": "Hook command valid",
+            "passed": True,
+            "message": "No hooks configured — skipping command validation",
+        })
+    else:
+        # Check the first command from the first hook event
+        all_commands_valid = True
+        bad_commands: list[str] = []
+        for event, matchers in hooks.items():
+            if not matchers:
+                continue
+            for matcher in matchers:
+                for hook in matcher.get("hooks", []):
+                    cmd = hook.get("command", "")
+                    if not cmd:
+                        continue
+                    # Extract the executable (first token)
+                    executable = cmd.split()[0] if cmd.split() else ""
+                    if executable and not os.path.isfile(executable):
+                        all_commands_valid = False
+                        bad_commands.append(executable)
+        if all_commands_valid:
+            checks.append({
+                "name": "Hook command valid",
+                "passed": True,
+                "message": "All hook commands reference valid executables",
+            })
+        else:
+            checks.append({
+                "name": "Hook command valid",
+                "passed": False,
+                "message": f"Command not found: {', '.join(bad_commands)}",
+            })
+
+    # --- Ollama reachable ---
+    try:
+        from scripts.lib.crux_ollama import check_ollama_running
+        ollama_ok = check_ollama_running()
+        checks.append({
+            "name": "Ollama reachable",
+            "passed": ollama_ok,
+            "message": "Ollama is running" if ollama_ok else "Ollama not reachable at localhost:11434",
+        })
+    except Exception:
+        checks.append({
+            "name": "Ollama reachable",
+            "passed": False,
+            "message": "Could not check Ollama status",
+        })
+
+    # --- Audit models available ---
+    try:
+        from scripts.lib.crux_ollama import list_models
+        from scripts.lib.crux_llm_audit import DEFAULT_MODEL_8B, DEFAULT_MODEL_32B
+        models_result = list_models()
+        if models_result.get("success"):
+            model_names = [m.get("name", "") for m in models_result.get("models", [])]
+            has_8b = any(n.startswith(DEFAULT_MODEL_8B) for n in model_names)
+            has_32b = any(n.startswith(DEFAULT_MODEL_32B) for n in model_names)
+            if has_8b and has_32b:
+                checks.append({
+                    "name": "Audit models available",
+                    "passed": True,
+                    "message": f"Both {DEFAULT_MODEL_8B} and {DEFAULT_MODEL_32B} are loaded",
+                })
+            else:
+                missing = []
+                if not has_8b:
+                    missing.append(DEFAULT_MODEL_8B)
+                if not has_32b:
+                    missing.append(DEFAULT_MODEL_32B)
+                checks.append({
+                    "name": "Audit models available",
+                    "passed": False,
+                    "message": f"Missing models: {', '.join(missing)}",
+                })
+        else:
+            checks.append({
+                "name": "Audit models available",
+                "passed": False,
+                "message": "Could not list Ollama models",
+            })
+    except Exception:
+        checks.append({
+            "name": "Audit models available",
+            "passed": False,
+            "message": "Could not check audit models",
+        })
+
+    # --- Background processor status ---
+    try:
+        from scripts.lib.crux_background_processor import get_processor_status
+        proc_status = get_processor_status(project_dir)
+        never_run = [k for k, v in proc_status.items() if v == "never"]
+        if never_run:
+            checks.append({
+                "name": "Background processor",
+                "passed": True,
+                "message": f"Processors not yet run: {', '.join(never_run)} (normal for new projects)",
+            })
+        else:
+            checks.append({
+                "name": "Background processor",
+                "passed": True,
+                "message": "All processors have run at least once",
+            })
+    except Exception:
+        checks.append({
+            "name": "Background processor",
+            "passed": False,
+            "message": "Could not check processor status",
+        })
+
+    # --- Cross-project registry ---
+    user_paths = get_user_paths(home)
+    registry_path = os.path.join(str(user_paths.root), "projects.json")
+    if os.path.exists(registry_path):
+        reg_data = _load_json_safe(registry_path)
+        project_count = len(reg_data.get("projects", []))
+        checks.append({
+            "name": "Cross-project registry",
+            "passed": True,
+            "message": f"{project_count} project(s) registered",
+        })
+    else:
+        checks.append({
+            "name": "Cross-project registry",
+            "passed": True,
+            "message": "No projects registered yet (run register_project to enable cross-project analytics)",
+        })
+
+    # --- Figma token ---
+    figma_token = os.environ.get("FIGMA_TOKEN")
+    checks.append({
+        "name": "Figma token",
+        "passed": True,
+        "message": "FIGMA_TOKEN is set" if figma_token else "FIGMA_TOKEN not set (optional — needed for design token imports)",
+    })
+
+    return checks
+
+
+# ---------------------------------------------------------------------------
+# verify_health — combined static + liveness report
+# ---------------------------------------------------------------------------
+
+def generate_findings(status: dict, health: dict) -> list[dict]:
+    """Generate actionable findings and recommendations from status and health data.
+
+    Each finding has: severity (critical|warning|info|positive), title, detail.
+    """
+    findings: list[dict] = []
+
+    # --- Critical: any failed health checks ---
+    failed_checks = [
+        c for c in health.get("static", []) + health.get("liveness", [])
+        if not c["passed"]
+    ]
+    for c in failed_checks:
+        findings.append({
+            "severity": "critical",
+            "title": f"{c['name']} failed",
+            "detail": c["message"],
+        })
+
+    # --- Session staleness ---
+    s = status.get("session", {})
+    try:
+        updated = datetime.strptime(s.get("updated_at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - updated).total_seconds() / 3600
+        if age_hours > 12:
+            findings.append({
+                "severity": "warning",
+                "title": "Session is stale",
+                "detail": f"Last updated {age_hours:.1f}h ago. Consider updating working_on to reflect current task.",
+            })
+    except (ValueError, AttributeError):
+        pass
+
+    # --- Correction patterns ---
+    c = status.get("corrections", {})
+    if c.get("total", 0) >= 5:
+        top_cat = max(c.get("by_category", {}).items(), key=lambda x: x[1], default=None)
+        if top_cat:
+            findings.append({
+                "severity": "warning",
+                "title": f"{c['total']} corrections accumulated",
+                "detail": f"Top category: {top_cat[0]} ({top_cat[1]}). Run background processors to extract knowledge.",
+            })
+    elif c.get("total", 0) == 0:
+        findings.append({
+            "severity": "info",
+            "title": "No corrections captured yet",
+            "detail": "Corrections are auto-detected from user prompts. The system learns from these over time.",
+        })
+
+    # --- Interaction volume ---
+    i = status.get("interactions", {})
+    today_count = i.get("today", 0)
+    if today_count > 500:
+        findings.append({
+            "severity": "info",
+            "title": f"High activity: {today_count} interactions today",
+            "detail": "Background processors will trigger automatically when thresholds are met.",
+        })
+    elif today_count == 0:
+        findings.append({
+            "severity": "warning",
+            "title": "No interactions logged today",
+            "detail": "Hook-based logging may not be active. Check PostToolUse hook configuration.",
+        })
+
+    # --- Knowledge base ---
+    k = status.get("knowledge", {})
+    if k.get("project_entries", 0) == 0:
+        findings.append({
+            "severity": "warning",
+            "title": "Empty knowledge base",
+            "detail": "Add knowledge entries to .crux/knowledge/ or use promote_knowledge to promote from corrections.",
+        })
+    elif k.get("project_entries", 0) >= 10:
+        findings.append({
+            "severity": "positive",
+            "title": f"Rich knowledge base: {k['project_entries']} entries",
+            "detail": "Consider promoting top entries to user scope (~/.crux/knowledge/) for cross-project use.",
+        })
+
+    # --- Pending tasks ---
+    p = status.get("pending", {})
+    if p.get("count", 0) > 10:
+        findings.append({
+            "severity": "warning",
+            "title": f"{p['count']} pending tasks",
+            "detail": "Consider triaging — archive completed items, prioritize the rest.",
+        })
+
+    # --- MCP tool count ---
+    m = status.get("mcp", {})
+    if m.get("registered") and m.get("tool_count", 0) > 0:
+        findings.append({
+            "severity": "positive",
+            "title": f"MCP server active with {m['tool_count']} tools",
+            "detail": "All Crux capabilities are available via MCP protocol.",
+        })
+
+    # --- Modes ---
+    md = status.get("modes", {})
+    if md.get("total", 0) > 0:
+        findings.append({
+            "severity": "positive",
+            "title": f"{md['total']} modes available",
+            "detail": f"Active: {s.get('active_mode', 'unknown')}. Switch modes to optimize for different task types.",
+        })
+
+    # --- Files tracked ---
+    ft = status.get("files", {}).get("tracked", 0)
+    if ft > 200:
+        findings.append({
+            "severity": "info",
+            "title": f"{ft} files tracked this session",
+            "detail": "Large file footprint. Review session scope if context is getting noisy.",
+        })
+
+    # --- Sort: critical first, then warning, info, positive ---
+    severity_order = {"critical": 0, "warning": 1, "info": 2, "positive": 3}
+    findings.sort(key=lambda f: severity_order.get(f["severity"], 99))
+
+    return findings
+
+
+def format_findings(findings: list[dict]) -> str:
+    """Format findings into human-readable output."""
+    if not findings:
+        return "FINDINGS\n  No findings to report."
+
+    severity_icons = {
+        "critical": "\033[0;31m✗\033[0m",
+        "warning": "\033[1;33m!\033[0m",
+        "info": "\033[0;36m·\033[0m",
+        "positive": "\033[0;32m✓\033[0m",
+    }
+
+    lines: list[str] = ["FINDINGS"]
+    for f in findings:
+        icon = severity_icons.get(f["severity"], "·")
+        lines.append(f"  {icon} {f['title']}")
+        lines.append(f"    {f['detail']}")
+    return "\n".join(lines)
+
+
+def verify_health(project_dir: str, home: str) -> dict:
+    """Run all health checks (static + liveness) and return a combined report."""
+    static = check_health(project_dir=project_dir, home=home)
+    liveness = check_liveness(project_dir=project_dir, home=home)
+
+    all_checks = static + liveness
+    total = len(all_checks)
+    passed = sum(1 for c in all_checks if c["passed"])
+    failed = total - passed
+
+    return {
+        "static": static,
+        "liveness": liveness,
+        "summary": {
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "all_passed": failed == 0,
+        },
+    }

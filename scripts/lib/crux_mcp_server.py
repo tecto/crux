@@ -38,6 +38,16 @@ from scripts.lib.crux_mcp_handlers import (
     handle_start_design_validation,
     handle_design_validation_summary,
     handle_check_contrast,
+    handle_verify_health,
+    handle_audit_script_8b,
+    handle_audit_script_32b,
+    handle_check_processor_thresholds,
+    handle_run_background_processors,
+    handle_get_processor_status,
+    handle_register_project,
+    handle_get_cross_project_digest,
+    handle_figma_get_tokens,
+    handle_figma_get_components,
 )
 
 mcp = FastMCP("crux", instructions="Crux AI operating system — knowledge, sessions, modes, and tool switching.")
@@ -315,6 +325,101 @@ def check_contrast(foreground: str, background: str) -> dict:
         background: Background hex color (e.g., '#FFFFFF').
     """
     return handle_check_contrast(foreground=foreground, background=background)
+
+
+@mcp.tool()
+def verify_health() -> dict:
+    """Run all health checks (static + liveness) and return a combined report.
+
+    Returns static checks (session, hooks, MCP, modes, etc.) and liveness checks
+    (hook completeness, conversation logging, log consistency, MCP loadable,
+    session freshness, hook command validity) with a pass/fail summary.
+    """
+    return handle_verify_health(project_dir=_project(), home=_home())
+
+
+@mcp.tool()
+def audit_script_8b(script_content: str, risk_level: str) -> dict:
+    """Gate 4: Run an adversarial security audit on a script using a small (8B) model.
+
+    Sends the script to an 8B LLM for independent security review.
+    Returns findings with severity levels. Skips gracefully if Ollama is unavailable.
+    """
+    return handle_audit_script_8b(script_content=script_content, risk_level=risk_level)
+
+
+@mcp.tool()
+def audit_script_32b(script_content: str, risk_level: str) -> dict:
+    """Gate 5: Run a second-opinion security audit using a large (32B) model.
+
+    Only runs for high-risk scripts. Provides structural review from a larger model.
+    Skips gracefully if Ollama is unavailable or script is not high-risk.
+    """
+    return handle_audit_script_32b(script_content=script_content, risk_level=risk_level)
+
+
+@mcp.tool()
+def check_processor_thresholds() -> dict:
+    """Check which background processing thresholds are exceeded.
+
+    Returns which processors are due to run based on correction queue size,
+    interaction count, and digest age.
+    """
+    return handle_check_processor_thresholds(project_dir=_project(), home=_home())
+
+
+@mcp.tool()
+def run_background_processors() -> dict:
+    """Run all due background processors (correction extraction, digest generation, mode audit).
+
+    Only runs processors whose thresholds are exceeded. Safe to call frequently —
+    processors are idempotent and update state after running.
+    """
+    return handle_run_background_processors(project_dir=_project(), home=_home())
+
+
+@mcp.tool()
+def get_processor_status() -> dict:
+    """Get when each background processor last ran (corrections, digest, mode audit)."""
+    return handle_get_processor_status(project_dir=_project())
+
+
+@mcp.tool()
+def register_project() -> dict:
+    """Register the current project for cross-project aggregation and analytics."""
+    return handle_register_project(project_dir=_project(), home=_home())
+
+
+@mcp.tool()
+def get_cross_project_digest(date: str | None = None) -> dict:
+    """Generate a digest spanning all registered projects.
+
+    Args:
+        date: Date in YYYY-MM-DD format. Omit for today.
+    """
+    return handle_get_cross_project_digest(home=_home(), date=date)
+
+
+@mcp.tool()
+def figma_get_tokens(file_key: str, token: str) -> dict:
+    """Extract design tokens (colors, typography, spacing) from a Figma file.
+
+    Args:
+        file_key: The Figma file key (from the URL).
+        token: Figma personal access token.
+    """
+    return handle_figma_get_tokens(file_key=file_key, token=token)
+
+
+@mcp.tool()
+def figma_get_components(file_key: str, token: str) -> dict:
+    """Get the component library from a Figma file.
+
+    Args:
+        file_key: The Figma file key (from the URL).
+        token: Figma personal access token.
+    """
+    return handle_figma_get_components(file_key=file_key, token=token)
 
 
 async def run():  # pragma: no cover — starts blocking stdio server

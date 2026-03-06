@@ -201,7 +201,7 @@ class TestGetStatus:
 
         result = get_status(project_dir=env["project"], home=env["home"])
         assert result["mcp"]["registered"] is True
-        assert result["mcp"]["tool_count"] == 24
+        assert result["mcp"]["tool_count"] == 34
 
     def test_mcp_not_registered_when_no_config(self, env):
         from scripts.lib.crux_status import get_status
@@ -415,3 +415,644 @@ class TestCheckHealth:
         for c in checks:
             assert "message" in c
             assert len(c["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Liveness checks — verify components are actually working at runtime
+# ---------------------------------------------------------------------------
+
+def _write_conversations(project_dir, entries):
+    """Helper to write conversation log entries."""
+    log_dir = os.path.join(project_dir, ".crux", "analytics", "conversations")
+    os.makedirs(log_dir, exist_ok=True)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    log_file = os.path.join(log_dir, f"{today}.jsonl")
+    with open(log_file, "a") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+
+
+def _setup_hooks(project_dir, events=None):
+    """Helper to configure hooks in settings.local.json."""
+    if events is None:
+        events = ["SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"]
+    claude_dir = os.path.join(project_dir, ".claude")
+    os.makedirs(claude_dir, exist_ok=True)
+    hooks = {}
+    for event in events:
+        hooks[event] = [{"matcher": "", "hooks": [{"type": "command", "command": "/usr/bin/python3 -m scripts.lib.crux_hook_runner " + event}]}]
+    settings = {"hooks": hooks}
+    with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+        json.dump(settings, f)
+
+
+class TestCheckLiveness:
+    """Liveness checks verify components are actually producing data at runtime."""
+
+    def test_returns_list_of_checks(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        assert isinstance(checks, list)
+        assert len(checks) > 0
+        assert all("name" in c and "passed" in c and "message" in c for c in checks)
+
+    # --- Hook completeness ---
+
+    def test_hook_completeness_passes_with_all_four(self, env):
+        from scripts.lib.crux_status import check_liveness
+        _setup_hooks(env["project"])
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        hook_check = next(c for c in checks if "hook completeness" in c["name"].lower())
+        assert hook_check["passed"] is True
+
+    def test_hook_completeness_fails_with_missing_hooks(self, env):
+        from scripts.lib.crux_status import check_liveness
+        _setup_hooks(env["project"], events=["PostToolUse", "Stop"])
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        hook_check = next(c for c in checks if "hook completeness" in c["name"].lower())
+        assert hook_check["passed"] is False
+        assert "SessionStart" in hook_check["message"] or "UserPromptSubmit" in hook_check["message"]
+
+    def test_hook_completeness_fails_with_no_hooks(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        hook_check = next(c for c in checks if "hook completeness" in c["name"].lower())
+        assert hook_check["passed"] is False
+
+    # --- Conversation logging ---
+
+    def test_conversation_logging_passes_with_todays_log(self, env):
+        from scripts.lib.crux_status import check_liveness
+        _write_conversations(env["project"], [
+            {"timestamp": "2026-03-06T12:00:00Z", "role": "user", "content": "hello"},
+        ])
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        conv_check = next(c for c in checks if "conversation" in c["name"].lower())
+        assert conv_check["passed"] is True
+
+    def test_conversation_logging_fails_with_no_log(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        conv_check = next(c for c in checks if "conversation" in c["name"].lower())
+        assert conv_check["passed"] is False
+
+    # --- Log consistency ---
+
+    def test_log_consistency_passes_when_both_exist(self, env):
+        from scripts.lib.crux_status import check_liveness
+        _write_interactions(env["project"], [
+            {"timestamp": "2026-03-06T12:00:00Z", "tool_name": "Bash", "tool_input": {}},
+        ])
+        _write_conversations(env["project"], [
+            {"timestamp": "2026-03-06T12:00:00Z", "role": "user", "content": "test"},
+        ])
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cons_check = next(c for c in checks if "consistency" in c["name"].lower())
+        assert cons_check["passed"] is True
+
+    def test_log_consistency_fails_when_interactions_but_no_conversations(self, env):
+        from scripts.lib.crux_status import check_liveness
+        _write_interactions(env["project"], [
+            {"timestamp": "2026-03-06T12:00:00Z", "tool_name": "Bash", "tool_input": {}},
+        ])
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cons_check = next(c for c in checks if "consistency" in c["name"].lower())
+        assert cons_check["passed"] is False
+        assert "UserPromptSubmit" in cons_check["message"]
+
+    def test_log_consistency_passes_when_neither_exists(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cons_check = next(c for c in checks if "consistency" in c["name"].lower())
+        assert cons_check["passed"] is True  # no data yet is fine
+
+    # --- MCP server loadable ---
+
+    def test_mcp_loadable_passes(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        mcp_check = next(c for c in checks if "mcp loadable" in c["name"].lower())
+        assert mcp_check["passed"] is True
+        assert "34" in mcp_check["message"]  # 34 tools
+
+    def test_mcp_loadable_reports_tool_count(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        mcp_check = next(c for c in checks if "mcp loadable" in c["name"].lower())
+        assert "tools" in mcp_check["message"].lower()
+
+    # --- Session freshness ---
+
+    def test_session_freshness_passes_when_recent(self, env):
+        from scripts.lib.crux_status import check_liveness
+        # env fixture just saved session, so it's fresh
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        fresh_check = next(c for c in checks if "session freshness" in c["name"].lower())
+        assert fresh_check["passed"] is True
+
+    def test_session_freshness_fails_when_stale(self, env):
+        from scripts.lib.crux_status import check_liveness
+        from scripts.lib.crux_session import load_session as _load
+        from datetime import timedelta
+        # Write stale timestamp directly (save_session auto-updates updated_at)
+        state = _load(env["crux_dir"])
+        old_time = datetime.now(timezone.utc) - timedelta(hours=25)
+        state.updated_at = old_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        state_path = os.path.join(env["crux_dir"], "sessions", "state.json")
+        with open(state_path, "w") as f:
+            json.dump(state.to_dict(), f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        fresh_check = next(c for c in checks if "session freshness" in c["name"].lower())
+        assert fresh_check["passed"] is False
+        assert "stale" in fresh_check["message"].lower() or "hour" in fresh_check["message"].lower()
+
+    # --- Hook command valid ---
+
+    def test_hook_command_valid_passes_with_real_python(self, env):
+        from scripts.lib.crux_status import check_liveness
+        import sys
+        _setup_hooks(env["project"], events=["PostToolUse"])
+        # Rewrite with actual python path
+        claude_dir = os.path.join(env["project"], ".claude")
+        settings = {"hooks": {"PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": f"{sys.executable} -m scripts.lib.crux_hook_runner PostToolUse"}]}]}}
+        with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+            json.dump(settings, f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
+        assert cmd_check["passed"] is True
+
+    def test_hook_command_valid_fails_with_bad_python(self, env):
+        from scripts.lib.crux_status import check_liveness
+        claude_dir = os.path.join(env["project"], ".claude")
+        os.makedirs(claude_dir, exist_ok=True)
+        settings = {"hooks": {"PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "/nonexistent/python3 -m scripts.lib.crux_hook_runner PostToolUse"}]}]}}
+        with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+            json.dump(settings, f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
+        assert cmd_check["passed"] is False
+        assert "nonexistent" in cmd_check["message"].lower() or "not found" in cmd_check["message"].lower()
+
+    def test_hook_command_skipped_when_no_hooks(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
+        # No hooks = skip (pass with info message)
+        assert "no hooks" in cmd_check["message"].lower()
+
+    def test_mcp_loadable_fails_on_import_error(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_status as status_mod
+        # Patch the import to fail inside check_liveness
+        original_liveness = status_mod.check_liveness
+
+        def patched_liveness(project_dir, home):
+            import builtins
+            real_import = builtins.__import__
+            def fail_import(name, *args, **kwargs):
+                if "crux_mcp_server" in name:
+                    raise ImportError("simulated MCP failure")
+                return real_import(name, *args, **kwargs)
+            builtins.__import__ = fail_import
+            try:
+                return original_liveness(project_dir, home)
+            finally:
+                builtins.__import__ = real_import
+
+        checks = patched_liveness(env["project"], env["home"])
+        mcp_check = next(c for c in checks if "mcp loadable" in c["name"].lower())
+        assert mcp_check["passed"] is False
+        assert "failed" in mcp_check["message"].lower()
+
+    def test_session_freshness_fails_with_bad_timestamp(self, env):
+        from scripts.lib.crux_status import check_liveness
+        # Write invalid timestamp
+        state_path = os.path.join(env["crux_dir"], "sessions", "state.json")
+        with open(state_path) as f:
+            data = json.load(f)
+        data["updated_at"] = "not-a-timestamp"
+        with open(state_path, "w") as f:
+            json.dump(data, f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        fresh_check = next(c for c in checks if "session freshness" in c["name"].lower())
+        assert fresh_check["passed"] is False
+        assert "parse" in fresh_check["message"].lower()
+
+    def test_hook_command_handles_empty_matchers(self, env):
+        from scripts.lib.crux_status import check_liveness
+        claude_dir = os.path.join(env["project"], ".claude")
+        os.makedirs(claude_dir, exist_ok=True)
+        # Hook event with empty list and one with empty command
+        settings = {"hooks": {
+            "SessionStart": [],
+            "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": ""}]}],
+        }}
+        with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+            json.dump(settings, f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
+        assert cmd_check["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# verify_health — combined static + liveness report
+# ---------------------------------------------------------------------------
+
+class TestVerifyHealth:
+    def test_returns_dict_with_both_sections(self, env):
+        from scripts.lib.crux_status import verify_health
+        result = verify_health(project_dir=env["project"], home=env["home"])
+        assert "static" in result
+        assert "liveness" in result
+        assert "summary" in result
+
+    def test_summary_includes_pass_fail_counts(self, env):
+        from scripts.lib.crux_status import verify_health
+        result = verify_health(project_dir=env["project"], home=env["home"])
+        assert "total" in result["summary"]
+        assert "passed" in result["summary"]
+        assert "failed" in result["summary"]
+
+    def test_all_passed_is_true_when_everything_passes(self, env, monkeypatch):
+        from scripts.lib.crux_status import verify_health
+        import sys
+        import scripts.lib.crux_ollama as ollama_mod
+        # Mock Ollama to always be available with both models
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: {
+            "success": True,
+            "models": [{"name": "qwen3:8b"}, {"name": "qwen3:32b"}],
+        })
+        # Set up everything to pass
+        _setup_hooks(env["project"])
+        # Fix hook command to use real python
+        claude_dir = os.path.join(env["project"], ".claude")
+        hooks = {}
+        for event in ["SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"]:
+            hooks[event] = [{"matcher": "", "hooks": [{"type": "command", "command": f"{sys.executable} -m scripts.lib.crux_hook_runner {event}"}]}]
+        with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+            json.dump({"hooks": hooks}, f)
+        # Set up MCP config
+        mcp_config = {"mcpServers": {"crux": {"command": "python"}}}
+        with open(os.path.join(claude_dir, "mcp.json"), "w") as f:
+            json.dump(mcp_config, f)
+        # Write interactions and conversations
+        _write_interactions(env["project"], [
+            {"timestamp": "t", "tool_name": "Bash", "tool_input": {}},
+        ])
+        _write_conversations(env["project"], [
+            {"timestamp": "t", "role": "user", "content": "test"},
+        ])
+
+        result = verify_health(project_dir=env["project"], home=env["home"])
+        assert result["summary"]["failed"] == 0
+        assert result["summary"]["all_passed"] is True
+
+    def test_all_passed_is_false_when_failures_exist(self, env):
+        from scripts.lib.crux_status import verify_health
+        result = verify_health(project_dir=env["project"], home=env["home"])
+        # Without hooks configured, some checks fail
+        assert result["summary"]["all_passed"] is False
+        assert result["summary"]["failed"] > 0
+
+
+# ---------------------------------------------------------------------------
+# New liveness checks — Ollama, processors, cross-project, Figma
+# ---------------------------------------------------------------------------
+
+class TestOllamaLivenessCheck:
+    def test_ollama_reachable_when_running(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        ollama_check = next(c for c in checks if "ollama reachable" in c["name"].lower())
+        assert ollama_check["passed"] is True
+        assert "running" in ollama_check["message"].lower()
+
+    def test_ollama_not_reachable(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: False)
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        ollama_check = next(c for c in checks if "ollama reachable" in c["name"].lower())
+        assert ollama_check["passed"] is False
+
+    def test_ollama_check_error_handled(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: (_ for _ in ()).throw(RuntimeError("fail")))
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        ollama_check = next(c for c in checks if "ollama reachable" in c["name"].lower())
+        assert ollama_check["passed"] is False
+
+
+class TestAuditModelsLivenessCheck:
+    def test_both_models_available(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: {
+            "success": True,
+            "models": [{"name": "qwen3:8b"}, {"name": "qwen3:32b"}],
+        })
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        model_check = next(c for c in checks if "audit models" in c["name"].lower())
+        assert model_check["passed"] is True
+
+    def test_missing_32b_model(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: {
+            "success": True,
+            "models": [{"name": "qwen3:8b"}],
+        })
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        model_check = next(c for c in checks if "audit models" in c["name"].lower())
+        assert model_check["passed"] is False
+        assert "qwen3:32b" in model_check["message"]
+
+    def test_missing_8b_model(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: {
+            "success": True,
+            "models": [{"name": "qwen3:32b"}],
+        })
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        model_check = next(c for c in checks if "audit models" in c["name"].lower())
+        assert model_check["passed"] is False
+        assert "qwen3:8b" in model_check["message"]
+
+    def test_list_models_fails(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: {"success": False})
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        model_check = next(c for c in checks if "audit models" in c["name"].lower())
+        assert model_check["passed"] is False
+
+    def test_list_models_exception(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_ollama as ollama_mod
+        monkeypatch.setattr(ollama_mod, "check_ollama_running", lambda **kw: True)
+        monkeypatch.setattr(ollama_mod, "list_models", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        model_check = next(c for c in checks if "audit models" in c["name"].lower())
+        assert model_check["passed"] is False
+
+
+class TestBackgroundProcessorLivenessCheck:
+    def test_processor_never_run(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        proc_check = next(c for c in checks if "background processor" in c["name"].lower())
+        assert proc_check["passed"] is True
+        assert "not yet run" in proc_check["message"].lower()
+
+    def test_processor_has_run(self, env):
+        from scripts.lib.crux_status import check_liveness
+        from scripts.lib.crux_background_processor import _save_processor_state
+        _save_processor_state(env["project"], {
+            "last_digest": "2026-03-06T01:00:00Z",
+            "last_corrections": "2026-03-06T01:00:00Z",
+            "last_mode_audit": "2026-03-06T01:00:00Z",
+        })
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        proc_check = next(c for c in checks if "background processor" in c["name"].lower())
+        assert proc_check["passed"] is True
+        assert "all processors" in proc_check["message"].lower()
+
+
+    def test_processor_exception_handled(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        import scripts.lib.crux_background_processor as bp
+        monkeypatch.setattr(bp, "get_processor_status", lambda pd: (_ for _ in ()).throw(RuntimeError("boom")))
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        proc_check = next(c for c in checks if "background processor" in c["name"].lower())
+        assert proc_check["passed"] is False
+        assert "could not" in proc_check["message"].lower()
+
+
+class TestCrossProjectRegistryCheck:
+    def test_no_registry(self, env):
+        from scripts.lib.crux_status import check_liveness
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        reg_check = next(c for c in checks if "cross-project" in c["name"].lower())
+        assert reg_check["passed"] is True
+        assert "no projects" in reg_check["message"].lower()
+
+    def test_has_registry(self, env):
+        from scripts.lib.crux_status import check_liveness
+        reg_path = os.path.join(env["home"], ".crux", "projects.json")
+        os.makedirs(os.path.dirname(reg_path), exist_ok=True)
+        with open(reg_path, "w") as f:
+            json.dump({"projects": ["/proj1", "/proj2"]}, f)
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        reg_check = next(c for c in checks if "cross-project" in c["name"].lower())
+        assert reg_check["passed"] is True
+        assert "2" in reg_check["message"]
+
+
+class TestFigmaTokenCheck:
+    def test_figma_token_set(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        monkeypatch.setenv("FIGMA_TOKEN", "test-token")
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        figma_check = next(c for c in checks if "figma" in c["name"].lower())
+        assert figma_check["passed"] is True
+        assert "is set" in figma_check["message"]
+
+    def test_figma_token_not_set(self, env, monkeypatch):
+        from scripts.lib.crux_status import check_liveness
+        monkeypatch.delenv("FIGMA_TOKEN", raising=False)
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        figma_check = next(c for c in checks if "figma" in c["name"].lower())
+        assert figma_check["passed"] is True
+        assert "not set" in figma_check["message"]
+
+
+# ---------------------------------------------------------------------------
+# generate_findings — actionable insights
+# ---------------------------------------------------------------------------
+
+class TestGenerateFindings:
+    def _make_status(self, **overrides):
+        base = {
+            "session": {
+                "active_mode": "build-py",
+                "active_tool": "claude-code",
+                "working_on": "test",
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "decisions": 2,
+            },
+            "interactions": {"today": 50, "tool_breakdown": {"Bash": 50}},
+            "corrections": {"total": 0, "by_category": {}},
+            "knowledge": {"project_entries": 3, "entry_names": ["a", "b", "c"]},
+            "mcp": {"registered": True, "tool_count": 34},
+            "modes": {"total": 15, "available": ["build-py"]},
+            "pending": {"count": 2, "items": ["a", "b"]},
+            "files": {"tracked": 10},
+            "hooks": {"active": True, "events_registered": 4, "events": []},
+        }
+        for k, v in overrides.items():
+            if isinstance(v, dict) and k in base:
+                base[k].update(v)
+            else:
+                base[k] = v
+        return base
+
+    def _make_health(self, all_passed=True):
+        checks = [{"name": "Session state", "passed": True, "message": "ok"}]
+        if not all_passed:
+            checks.append({"name": "Ollama", "passed": False, "message": "Not reachable"})
+        return {"static": checks, "liveness": [], "summary": {}}
+
+    def test_returns_list(self):
+        from scripts.lib.crux_status import generate_findings
+        result = generate_findings(self._make_status(), self._make_health())
+        assert isinstance(result, list)
+
+    def test_failed_check_produces_critical(self):
+        from scripts.lib.crux_status import generate_findings
+        findings = generate_findings(self._make_status(), self._make_health(all_passed=False))
+        critical = [f for f in findings if f["severity"] == "critical"]
+        assert len(critical) == 1
+        assert "Ollama" in critical[0]["title"]
+
+    def test_stale_session_warning(self):
+        from scripts.lib.crux_status import generate_findings
+        old_ts = "2026-03-05T01:00:00Z"
+        status = self._make_status(session={
+            "active_mode": "build-py", "active_tool": "claude-code",
+            "working_on": "x", "updated_at": old_ts, "decisions": 0,
+        })
+        findings = generate_findings(status, self._make_health())
+        stale = [f for f in findings if "stale" in f["title"].lower()]
+        assert len(stale) == 1
+        assert stale[0]["severity"] == "warning"
+
+    def test_many_corrections_warning(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(corrections={"total": 7, "by_category": {"style": 5, "logic": 2}})
+        findings = generate_findings(status, self._make_health())
+        corr = [f for f in findings if "correction" in f["title"].lower()]
+        assert len(corr) == 1
+        assert "style" in corr[0]["detail"]
+
+    def test_zero_corrections_info(self):
+        from scripts.lib.crux_status import generate_findings
+        findings = generate_findings(self._make_status(), self._make_health())
+        corr = [f for f in findings if "correction" in f["title"].lower()]
+        assert len(corr) == 1
+        assert corr[0]["severity"] == "info"
+
+    def test_high_interactions_info(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(interactions={"today": 600, "tool_breakdown": {}})
+        findings = generate_findings(status, self._make_health())
+        high = [f for f in findings if "activity" in f["title"].lower()]
+        assert len(high) == 1
+
+    def test_zero_interactions_warning(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(interactions={"today": 0, "tool_breakdown": {}})
+        findings = generate_findings(status, self._make_health())
+        no_int = [f for f in findings if "interaction" in f["title"].lower()]
+        assert len(no_int) == 1
+        assert no_int[0]["severity"] == "warning"
+
+    def test_empty_knowledge_warning(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(knowledge={"project_entries": 0, "entry_names": []})
+        findings = generate_findings(status, self._make_health())
+        kb = [f for f in findings if "knowledge" in f["title"].lower()]
+        assert len(kb) == 1
+        assert kb[0]["severity"] == "warning"
+
+    def test_rich_knowledge_positive(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(knowledge={"project_entries": 12, "entry_names": []})
+        findings = generate_findings(status, self._make_health())
+        kb = [f for f in findings if "knowledge" in f["title"].lower()]
+        assert len(kb) == 1
+        assert kb[0]["severity"] == "positive"
+
+    def test_many_pending_warning(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(pending={"count": 15, "items": []})
+        findings = generate_findings(status, self._make_health())
+        pend = [f for f in findings if "pending" in f["title"].lower()]
+        assert len(pend) == 1
+        assert pend[0]["severity"] == "warning"
+
+    def test_mcp_positive(self):
+        from scripts.lib.crux_status import generate_findings
+        findings = generate_findings(self._make_status(), self._make_health())
+        mcp = [f for f in findings if "mcp" in f["title"].lower()]
+        assert len(mcp) == 1
+        assert mcp[0]["severity"] == "positive"
+
+    def test_modes_positive(self):
+        from scripts.lib.crux_status import generate_findings
+        findings = generate_findings(self._make_status(), self._make_health())
+        modes = [f for f in findings if "mode" in f["title"].lower()]
+        assert len(modes) == 1
+        assert modes[0]["severity"] == "positive"
+
+    def test_large_file_footprint_info(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(files={"tracked": 250})
+        findings = generate_findings(status, self._make_health())
+        ft = [f for f in findings if "file" in f["title"].lower()]
+        assert len(ft) == 1
+        assert ft[0]["severity"] == "info"
+
+    def test_sorted_by_severity(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(interactions={"today": 0, "tool_breakdown": {}})
+        findings = generate_findings(status, self._make_health(all_passed=False))
+        severities = [f["severity"] for f in findings]
+        order = {"critical": 0, "warning": 1, "info": 2, "positive": 3}
+        assert severities == sorted(severities, key=lambda s: order.get(s, 99))
+
+    def test_invalid_timestamp_no_crash(self):
+        from scripts.lib.crux_status import generate_findings
+        status = self._make_status(session={
+            "active_mode": "x", "active_tool": "y",
+            "working_on": "", "updated_at": "bad", "decisions": 0,
+        })
+        # Should not raise
+        findings = generate_findings(status, self._make_health())
+        assert isinstance(findings, list)
+
+
+class TestFormatFindings:
+    def test_empty_findings(self):
+        from scripts.lib.crux_status import format_findings
+        result = format_findings([])
+        assert "No findings" in result
+
+    def test_formats_each_finding(self):
+        from scripts.lib.crux_status import format_findings
+        findings = [
+            {"severity": "critical", "title": "Something broke", "detail": "Fix it"},
+            {"severity": "positive", "title": "All good", "detail": "Nice"},
+        ]
+        result = format_findings(findings)
+        assert "Something broke" in result
+        assert "Fix it" in result
+        assert "All good" in result
+
+    def test_includes_findings_header(self):
+        from scripts.lib.crux_status import format_findings
+        result = format_findings([{"severity": "info", "title": "t", "detail": "d"}])
+        assert result.startswith("FINDINGS")

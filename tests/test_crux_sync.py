@@ -9,6 +9,8 @@ import pytest
 from scripts.lib.crux_sync import (
     sync_opencode,
     sync_claude_code,
+    sync_cursor,
+    sync_windsurf,
     sync_tool,
     strip_frontmatter,
     SUPPORTED_TOOLS,
@@ -68,6 +70,8 @@ class TestSupportedTools:
     def test_includes_expected_tools(self):
         assert "opencode" in SUPPORTED_TOOLS
         assert "claude-code" in SUPPORTED_TOOLS
+        assert "cursor" in SUPPORTED_TOOLS
+        assert "windsurf" in SUPPORTED_TOOLS
 
     def test_is_frozen(self):
         assert isinstance(SUPPORTED_TOOLS, (tuple, frozenset, list))
@@ -103,6 +107,56 @@ class TestSyncOpenCode:
         sync_opencode(project_dir=env["project"], home=env["home"])
         know_link = Path(env["home"]) / ".config" / "opencode" / "knowledge"
         assert know_link.exists()
+
+    def test_merges_agents_md(self, env):
+        sync_opencode(project_dir=env["project"], home=env["home"])
+        agents_md = Path(env["home"]) / ".config" / "opencode" / "AGENTS.md"
+        assert agents_md.exists()
+        assert not agents_md.is_symlink()  # regular file, not symlink
+        content = agents_md.read_text()
+        assert "log_interaction" in content
+        assert "<!-- CRUX:START -->" in content
+        assert "<!-- CRUX:END -->" in content
+
+    def test_agents_md_preserves_existing_content(self, env):
+        config_dir = Path(env["home"]) / ".config" / "opencode"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        agents_md = config_dir / "AGENTS.md"
+        agents_md.write_text("# My Custom Rules\n\nDo things my way.\n")
+
+        sync_opencode(project_dir=env["project"], home=env["home"])
+        content = agents_md.read_text()
+        assert "My Custom Rules" in content
+        assert "Do things my way" in content
+        assert "log_interaction" in content
+
+    def test_agents_md_updates_crux_section_on_resync(self, env):
+        sync_opencode(project_dir=env["project"], home=env["home"])
+        agents_md = Path(env["home"]) / ".config" / "opencode" / "AGENTS.md"
+        # Second sync should replace, not duplicate
+        sync_opencode(project_dir=env["project"], home=env["home"])
+        content = agents_md.read_text()
+        assert content.count("<!-- CRUX:START -->") == 1
+        assert content.count("<!-- CRUX:END -->") == 1
+
+    def test_agents_md_converts_legacy_symlink(self, env):
+        from scripts.lib.crux_sync import _crux_repo_root
+        config_dir = Path(env["home"]) / ".config" / "opencode"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        agents_md = config_dir / "AGENTS.md"
+        # Simulate legacy symlink
+        source = os.path.join(_crux_repo_root(), "templates", "AGENTS.md")
+        os.symlink(source, str(agents_md))
+        assert agents_md.is_symlink()
+
+        sync_opencode(project_dir=env["project"], home=env["home"])
+        assert not agents_md.is_symlink()
+        content = agents_md.read_text()
+        assert "<!-- CRUX:START -->" in content
+
+    def test_agents_md_in_items_synced(self, env):
+        result = sync_opencode(project_dir=env["project"], home=env["home"])
+        assert "AGENTS.md" in result.items_synced
 
     def test_lists_created_items(self, env):
         result = sync_opencode(project_dir=env["project"], home=env["home"])
@@ -473,3 +527,187 @@ class TestSyncClaudeCodeFrontmatterStripping:
         sync_claude_code(project_dir=env["project"], home=env["home"])
         agent = (Path(env["project"]) / ".claude" / "agents" / "build-py.md").read_text()
         assert "Python specialist body." in agent
+
+
+# ---------------------------------------------------------------------------
+# sync_cursor
+# ---------------------------------------------------------------------------
+
+class TestSyncCursor:
+    def test_creates_cursor_rules_dir(self, env):
+        result = sync_cursor(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert result.tool == "cursor"
+        rules_dir = Path(env["project"]) / ".cursor" / "rules"
+        assert rules_dir.is_dir()
+
+    def test_creates_rules_from_modes(self, env):
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        rules_dir = Path(env["project"]) / ".cursor" / "rules"
+        assert (rules_dir / "build-py.md").exists()
+        assert (rules_dir / "debug.md").exists()
+
+    def test_strips_frontmatter_from_rules(self, env):
+        modes_dir = Path(env["home"]) / ".crux" / "modes"
+        (modes_dir / "build-py.md").write_text(
+            "---\nmodel: ollama/crux-code\ntemperature: 0.4\n---\n\nPython specialist."
+        )
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        rule = (Path(env["project"]) / ".cursor" / "rules" / "build-py.md").read_text()
+        assert "---" not in rule
+        assert "Python specialist." in rule
+
+    def test_creates_context_rule(self, env):
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        context = (Path(env["project"]) / ".cursor" / "rules" / "crux-context.md").read_text()
+        assert "debug" in context  # active mode
+        assert "Fixing auth bug" in context  # working_on
+
+    def test_writes_mcp_config(self, env):
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        mcp_path = Path(env["project"]) / ".cursor" / "mcp.json"
+        assert mcp_path.exists()
+        with open(mcp_path) as f:
+            config = json.load(f)
+        assert "mcpServers" in config
+        assert "crux" in config["mcpServers"]
+
+    def test_merges_existing_mcp_config(self, env):
+        mcp_path = Path(env["project"]) / ".cursor" / "mcp.json"
+        mcp_path.parent.mkdir(parents=True, exist_ok=True)
+        mcp_path.write_text(json.dumps({"mcpServers": {"other": {"command": "test"}}}))
+
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        with open(mcp_path) as f:
+            config = json.load(f)
+        assert "other" in config["mcpServers"]
+        assert "crux" in config["mcpServers"]
+
+    def test_creates_crux_agent_rule(self, env):
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        agent = Path(env["project"]) / ".cursor" / "rules" / "crux-agent.md"
+        assert agent.exists()
+
+    def test_items_synced(self, env):
+        result = sync_cursor(project_dir=env["project"], home=env["home"])
+        assert "crux-context" in result.items_synced
+        assert "mcp-config" in result.items_synced
+        assert any(i.startswith("rule:") for i in result.items_synced)
+
+    def test_idempotent(self, env):
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        result = sync_cursor(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# sync_windsurf
+# ---------------------------------------------------------------------------
+
+class TestSyncWindsurf:
+    def test_creates_windsurf_rules_dir(self, env):
+        result = sync_windsurf(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert result.tool == "windsurf"
+        rules_dir = Path(env["project"]) / ".windsurf" / "rules"
+        assert rules_dir.is_dir()
+
+    def test_creates_rules_from_modes(self, env):
+        sync_windsurf(project_dir=env["project"], home=env["home"])
+        rules_dir = Path(env["project"]) / ".windsurf" / "rules"
+        assert (rules_dir / "build-py.md").exists()
+
+    def test_strips_frontmatter(self, env):
+        modes_dir = Path(env["home"]) / ".crux" / "modes"
+        (modes_dir / "build-py.md").write_text(
+            "---\nmodel: test\n---\n\nWindsurf body."
+        )
+        sync_windsurf(project_dir=env["project"], home=env["home"])
+        rule = (Path(env["project"]) / ".windsurf" / "rules" / "build-py.md").read_text()
+        assert "Windsurf body." in rule
+        assert "model:" not in rule
+
+    def test_creates_context_rule(self, env):
+        sync_windsurf(project_dir=env["project"], home=env["home"])
+        context = (Path(env["project"]) / ".windsurf" / "rules" / "crux-context.md").read_text()
+        assert "debug" in context
+        assert "Fixing auth bug" in context
+
+    def test_writes_mcp_config(self, env):
+        sync_windsurf(project_dir=env["project"], home=env["home"])
+        mcp_path = Path(env["project"]) / ".windsurf" / "mcp.json"
+        assert mcp_path.exists()
+        with open(mcp_path) as f:
+            config = json.load(f)
+        assert "crux" in config["mcpServers"]
+
+    def test_items_synced(self, env):
+        result = sync_windsurf(project_dir=env["project"], home=env["home"])
+        assert "crux-context" in result.items_synced
+        assert "mcp-config" in result.items_synced
+
+    def test_creates_crux_agent_rule(self, env):
+        sync_windsurf(project_dir=env["project"], home=env["home"])
+        agent = Path(env["project"]) / ".windsurf" / "rules" / "crux-agent.md"
+        assert agent.exists()
+
+
+# ---------------------------------------------------------------------------
+# sync_tool dispatch for cursor/windsurf
+# ---------------------------------------------------------------------------
+
+class TestSyncToolDispatchNew:
+    def test_dispatches_cursor(self, env):
+        result = sync_tool("cursor", project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert result.tool == "cursor"
+
+    def test_dispatches_windsurf(self, env):
+        result = sync_tool("windsurf", project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert result.tool == "windsurf"
+
+    def test_updates_session_on_cursor_sync(self, env):
+        from scripts.lib.crux_session import load_session
+        sync_tool("cursor", project_dir=env["project"], home=env["home"])
+        state = load_session(env["crux_dir"])
+        assert state.active_tool == "cursor"
+
+    def test_updates_session_on_windsurf_sync(self, env):
+        from scripts.lib.crux_session import load_session
+        sync_tool("windsurf", project_dir=env["project"], home=env["home"])
+        state = load_session(env["crux_dir"])
+        assert state.active_tool == "windsurf"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases for coverage
+# ---------------------------------------------------------------------------
+
+class TestSyncEdgeCases:
+    def test_frontmatter_ending_with_no_body(self):
+        content = "---\nkey: value\n---"
+        result = strip_frontmatter(content)
+        assert result == ""
+
+    def test_context_includes_pending_tasks(self, env):
+        from scripts.lib.crux_session import load_session, save_session
+        state = load_session(env["crux_dir"])
+        state.pending = ["Fix login bug", "Deploy API"]
+        save_session(state, project_crux_dir=env["crux_dir"])
+
+        sync_cursor(project_dir=env["project"], home=env["home"])
+        context = (Path(env["project"]) / ".cursor" / "rules" / "crux-context.md").read_text()
+        assert "Fix login bug" in context
+        assert "Deploy API" in context
+
+    def test_cursor_handles_corrupt_mcp_config(self, env):
+        mcp_path = Path(env["project"]) / ".cursor" / "mcp.json"
+        mcp_path.parent.mkdir(parents=True, exist_ok=True)
+        mcp_path.write_text("not json")
+
+        result = sync_cursor(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        with open(mcp_path) as f:
+            config = json.load(f)
+        assert "crux" in config["mcpServers"]

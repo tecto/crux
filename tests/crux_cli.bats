@@ -237,24 +237,15 @@ teardown() {
     [[ "$output" == *"SESSION"* ]]
 }
 
-@test "crux status --health runs health checks" {
+@test "crux status includes health checks" {
     mkdir -p "$TEST_DIR/.crux/sessions"
     mkdir -p "$TEST_DIR/.crux/knowledge"
     export CRUX_PROJECT="$TEST_DIR"
     export CRUX_HOME="$TEST_DIR"
-    run bash "$CRUX_CLI" status --health
+    run bash "$CRUX_CLI" status
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Health Checks"* ]]
-}
-
-@test "crux status health shows check results" {
-    mkdir -p "$TEST_DIR/.crux/sessions"
-    mkdir -p "$TEST_DIR/.crux/knowledge"
-    export CRUX_PROJECT="$TEST_DIR"
-    export CRUX_HOME="$TEST_DIR"
-    run bash "$CRUX_CLI" status health
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"checks passed"* ]] || [[ "$output" == *"Session"* ]]
+    [[ "$output" == *"HEALTH CHECKS"* ]]
+    [[ "$output" == *"checks passed"* ]]
 }
 
 @test "crux status shows hooks info" {
@@ -347,4 +338,48 @@ teardown() {
     [[ "$output" == *"plugins"* ]]
     [[ "$output" == *"tools"* ]]
     [[ "$output" == *"commands"* ]]
+}
+
+# =========================================================================
+# Switch
+# =========================================================================
+
+@test "crux switch with no args shows usage" {
+    run bash "$CRUX_CLI" switch
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Usage: crux switch"* ]]
+    [[ "$output" == *"Supported tools"* ]]
+}
+
+@test "crux switch with invalid tool shows error" {
+    export CRUX_PROJECT="$CRUX_REPO"
+    run bash "$CRUX_CLI" switch invalid-tool
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Unsupported tool"* ]]
+}
+
+@test "crux switch cursor generates config" {
+    export CRUX_PROJECT="$CRUX_REPO"
+    run bash "$CRUX_CLI" switch cursor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Switched"* ]]
+    [[ "$output" == *"cursor"* ]]
+    # Verify files created
+    [ -f "$CRUX_REPO/.cursor/mcp.json" ]
+    [ -d "$CRUX_REPO/.cursor/rules" ]
+}
+
+@test "crux switch claude-code restores from cursor" {
+    export CRUX_PROJECT="$CRUX_REPO"
+    # Switch to cursor first, then back
+    bash "$CRUX_CLI" switch cursor
+    run bash "$CRUX_CLI" switch claude-code
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"cursor → claude-code"* ]]
+}
+
+@test "crux help shows switch command" {
+    run bash "$CRUX_CLI" help
+    [[ "$output" == *"switch"* ]]
+    [[ "$output" == *"crux switch opencode"* ]]
 }

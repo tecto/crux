@@ -114,13 +114,23 @@ class TestMCPToolRegistration:
             "design_validation_summary",
             "check_contrast",
             "restore_context",
+            "verify_health",
+            "audit_script_8b",
+            "audit_script_32b",
+            "check_processor_thresholds",
+            "run_background_processors",
+            "get_processor_status",
+            "register_project",
+            "get_cross_project_digest",
+            "figma_get_tokens",
+            "figma_get_components",
         }
         registered = set(tools.keys())
         assert expected.issubset(registered), f"Missing tools: {expected - registered}"
 
     def test_tool_count(self, server_module):
         tools = server_module.mcp._tool_manager._tools
-        assert len(tools) >= 24
+        assert len(tools) >= 34
 
 
 class TestRunFunction:
@@ -244,6 +254,51 @@ class TestToolWrappers:
             role="assistant", content="Here's the implementation..."
         )
         assert result["logged"]
+
+    def test_verify_health(self, live_env):
+        result = live_env["mod"].verify_health()
+        assert "static" in result
+        assert "liveness" in result
+        assert "summary" in result
+        assert isinstance(result["summary"]["total"], int)
+        assert result["summary"]["total"] > 0
+
+    def test_audit_script_8b(self, live_env):
+        result = live_env["mod"].audit_script_8b(script_content="echo hello", risk_level="low")
+        assert "passed" in result
+
+    def test_audit_script_32b_skips_low(self, live_env):
+        result = live_env["mod"].audit_script_32b(script_content="echo hello", risk_level="low")
+        assert result["passed"] is True
+        assert result.get("skipped") is True
+
+    def test_check_processor_thresholds(self, live_env):
+        result = live_env["mod"].check_processor_thresholds()
+        assert "corrections_exceeded" in result
+
+    def test_run_background_processors(self, live_env):
+        result = live_env["mod"].run_background_processors()
+        assert result["success"] is True
+
+    def test_get_processor_status(self, live_env):
+        result = live_env["mod"].get_processor_status()
+        assert "last_digest" in result
+
+    def test_register_project(self, live_env):
+        result = live_env["mod"].register_project()
+        assert result["registered"] is True
+
+    def test_get_cross_project_digest(self, live_env):
+        result = live_env["mod"].get_cross_project_digest()
+        assert "date" in result
+
+    def test_figma_get_tokens_error(self, live_env):
+        result = live_env["mod"].figma_get_tokens(file_key="fake", token="fake")
+        assert result["success"] is False
+
+    def test_figma_get_components_error(self, live_env):
+        result = live_env["mod"].figma_get_components(file_key="fake", token="fake")
+        assert result["success"] is False
 
     def test_log_interaction_persists_to_file(self, live_env):
         import json

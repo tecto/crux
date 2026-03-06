@@ -257,7 +257,10 @@ def handle_session_start(
     home: str,
 ) -> dict:
     """Handle SessionStart event — inject Crux context."""
-    state = load_session(os.path.join(project_dir, ".crux"))
+    crux_dir = os.path.join(project_dir, ".crux")
+    # Hooks only fire inside Claude Code — auto-detect the active tool
+    update_session(project_crux_dir=crux_dir, active_tool="claude-code")
+    state = load_session(crux_dir)
     user_paths = get_user_paths(home)
 
     parts: list[str] = []
@@ -291,12 +294,15 @@ def handle_session_start(
     return {"status": "ok", "context": context}
 
 
+_PROCESSOR_CHECK_INTERVAL = 50
+
+
 def handle_post_tool_use(
     event_data: dict,
     project_dir: str,
     home: str,
 ) -> dict:
-    """Handle PostToolUse — track files and log interactions."""
+    """Handle PostToolUse — track files, log interactions, periodic processor check."""
     tool_name = event_data.get("tool_name", "")
     tool_input = event_data.get("tool_input", {})
     crux_dir = os.path.join(project_dir, ".crux")
@@ -313,7 +319,25 @@ def handle_post_tool_use(
             update_session(crux_dir, add_file=file_path)
             result["file_tracked"] = file_path
 
+    # Periodic background processor check
+    count = _count_interactions(project_dir)
+    if count > 0 and count % _PROCESSOR_CHECK_INTERVAL == 0:
+        bg_result = _try_background_processors(project_dir, home)
+        if bg_result is not None:
+            result["processors_run"] = bg_result.get("processors_run", [])
+
     return result
+
+
+def _try_background_processors(project_dir: str, home: str) -> dict | None:
+    """Run background processors if thresholds are exceeded. Never raises."""
+    try:
+        from scripts.lib.crux_background_processor import should_process, run_processors
+        if should_process(project_dir, home):
+            return run_processors(project_dir, home)
+    except Exception:
+        pass
+    return None
 
 
 def handle_stop(
@@ -321,7 +345,7 @@ def handle_stop(
     project_dir: str,
     home: str,
 ) -> dict:
-    """Handle Stop — update session timestamp, record interaction count, check TDD."""
+    """Handle Stop — update session timestamp, record interaction count, check TDD, run processors."""
     crux_dir = os.path.join(project_dir, ".crux")
     state = load_session(crux_dir)
     save_session(state, project_crux_dir=crux_dir)  # updates timestamp
@@ -331,13 +355,20 @@ def handle_stop(
     # TDD compliance check
     tdd = check_tdd_compliance(state.files_touched)
 
-    return {
+    # Background processor check
+    bg_result = _try_background_processors(project_dir, home)
+
+    result: dict = {
         "status": "ok",
         "interaction_count": count,
         "tdd_compliant": tdd["compliant"],
         "tdd_warnings": tdd["warnings"],
         "tdd_expected": tdd["expected_tests"],
     }
+    if bg_result is not None:
+        result["processors_run"] = bg_result.get("processors_run", [])
+
+    return result
 
 
 def handle_user_prompt(

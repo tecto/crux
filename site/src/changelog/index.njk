@@ -1,0 +1,54 @@
+---
+layout: base.njk
+title: changelog - crux
+description: what's new in crux
+---
+
+<h1>changelog</h1>
+
+<div class="changelog">
+  <div class="changelog-item">
+    <h2>2026-03-06</h2>
+    <p class="date">gap items 1-6 complete</p>
+    <ul>
+      <li>Ollama API client — stdlib-only REST client for /api/tags, /api/pull, /api/generate</li>
+      <li>Gate 4-5 LLM audit — adversarial script auditing via local models (qwen3:8b, qwen3:32b)</li>
+      <li>background processor engine — threshold-triggered continuous learning (corrections, mode audit, digest)</li>
+      <li>cross-project aggregation — discover, register, and aggregate analytics across projects</li>
+      <li>Figma API client — design token extraction, CSS/Tailwind generation</li>
+      <li>Cursor adapter — .cursor/rules/ + .cursor/mcp.json generation</li>
+      <li>Windsurf adapter — .windsurf/rules/ + .windsurf/mcp.json generation</li>
+      <li>5 new liveness checks — Ollama, audit models, processors, cross-project, Figma</li>
+      <li>crux status findings — actionable insights and recommendations</li>
+      <li>auto tool detection — SessionStart hook sets active_tool to claude-code</li>
+      <li>MCP server: 27 → 34 tools</li>
+      <li>test suite: 1505 tests (1113 Python, 199 JavaScript, 213 Bash), 100% Python coverage</li>
+    </ul>
+  </div>
+
+  <div class="changelog-item">
+    <h2>2026-03-05</h2>
+    <p class="date">full-text conversation logging, 7-gate safety pipeline, 23 modes, Claude Code hooks</p>
+    <ul>
+      <li>full-text conversation logging via UserPromptSubmit hook and log_interaction MCP tool</li>
+      <li>7-gate safety pipeline with TDD enforcement, recursive security audit, design validation</li>
+      <li>23 specialized modes across coding, architecture, quality, design, and more</li>
+      <li>Claude Code hooks — SessionStart, PostToolUse, UserPromptSubmit, Stop</li>
+      <li>crux adopt — mid-session onboarding for existing projects</li>
+      <li>MCP server with 27 tools</li>
+    </ul>
+  </div>
+
+  <div class="changelog-item">
+    <h2>2026-03-04</h2>
+    <p class="date">tool-agnostic .crux/ architecture, MCP server, initial release</p>
+    <ul>
+      <li>decoupled crux from OpenCode — tool-agnostic .crux/ directory</li>
+      <li>MCP server with FastMCP — all logic in one server</li>
+      <li>session state management with cross-tool switching</li>
+      <li>knowledge base with project and user scopes</li>
+      <li>6 OpenCode plugins, 9 custom tools</li>
+      <li>initial test suite</li>
+    </ul>
+  </div>
+</div>

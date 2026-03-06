@@ -579,3 +579,84 @@ def handle_restore_context(project_dir: str, home: str) -> dict:
         parts.append(f"\n## Handoff Context\n{handoff}")
 
     return {"context": "\n".join(parts)}
+
+
+def handle_verify_health(project_dir: str, home: str) -> dict:
+    """Run combined static + liveness health checks and return a full report."""
+    from scripts.lib.crux_status import verify_health
+    return verify_health(project_dir=project_dir, home=home)
+
+
+def handle_audit_script_8b(script_content: str, risk_level: str) -> dict:
+    """Gate 4: Run 8B adversarial audit on a script."""
+    from scripts.lib.crux_llm_audit import audit_script_8b
+    return audit_script_8b(script_content, risk_level)
+
+
+def handle_audit_script_32b(script_content: str, risk_level: str) -> dict:
+    """Gate 5: Run 32B second-opinion audit on a script (high-risk only)."""
+    from scripts.lib.crux_llm_audit import audit_script_32b
+    return audit_script_32b(script_content, risk_level)
+
+
+# ---------------------------------------------------------------------------
+# Background processor
+# ---------------------------------------------------------------------------
+
+def handle_check_processor_thresholds(project_dir: str, home: str) -> dict:
+    """Check which background processing thresholds are exceeded."""
+    from scripts.lib.crux_background_processor import check_thresholds
+    return check_thresholds(project_dir, home)
+
+
+def handle_run_background_processors(project_dir: str, home: str) -> dict:
+    """Run all due background processors (corrections, digest, mode audit)."""
+    from scripts.lib.crux_background_processor import run_processors
+    return run_processors(project_dir, home)
+
+
+def handle_get_processor_status(project_dir: str) -> dict:
+    """Get when each background processor last ran."""
+    from scripts.lib.crux_background_processor import get_processor_status
+    return get_processor_status(project_dir)
+
+
+# ---------------------------------------------------------------------------
+# Cross-project aggregation
+# ---------------------------------------------------------------------------
+
+def handle_register_project(project_dir: str, home: str) -> dict:
+    """Register a project for cross-project aggregation."""
+    from scripts.lib.crux_cross_project import register_project
+    return register_project(project_dir, home)
+
+
+def handle_get_cross_project_digest(home: str, date: str | None = None) -> dict:
+    """Generate a cross-project digest for the given date."""
+    from scripts.lib.crux_cross_project import generate_user_digest
+    return generate_user_digest(home, date)
+
+
+# ---------------------------------------------------------------------------
+# Figma
+# ---------------------------------------------------------------------------
+
+def handle_figma_get_tokens(file_key: str, token: str) -> dict:
+    """Fetch a Figma file and extract design tokens."""
+    from scripts.lib.crux_figma import get_file, extract_design_tokens, generate_token_css, generate_token_tailwind
+    result = get_file(file_key, token)
+    if not result["success"]:
+        return result
+    tokens = extract_design_tokens(result["data"])
+    return {
+        "success": True,
+        "tokens": tokens,
+        "css": generate_token_css(tokens),
+        "tailwind": generate_token_tailwind(tokens),
+    }
+
+
+def handle_figma_get_components(file_key: str, token: str) -> dict:
+    """Fetch Figma components from a file."""
+    from scripts.lib.crux_figma import get_file_components
+    return get_file_components(file_key, token)

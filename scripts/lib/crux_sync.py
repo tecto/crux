@@ -16,7 +16,7 @@ from pathlib import Path
 from scripts.lib.crux_paths import get_project_paths, get_user_paths
 from scripts.lib.crux_session import load_session, read_handoff, update_session
 
-SUPPORTED_TOOLS = ("opencode", "claude-code")
+SUPPORTED_TOOLS = ("opencode", "claude-code", "cursor", "windsurf")
 
 # Permission presets for OpenCode agent frontmatter
 _PERM_FULL = {"read": "allow", "edit": "allow", "bash": "ask"}
@@ -135,6 +135,60 @@ def _safe_write(path: str, content: str) -> None:
         f.write(content)
 
 
+def _crux_repo_root() -> str:
+    """Resolve the Crux repo root (where scripts/, templates/ live)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+CRUX_AGENTS_START = "<!-- CRUX:START -->"
+CRUX_AGENTS_END = "<!-- CRUX:END -->"
+
+
+def _merge_agents_md(source: str, target: str) -> None:
+    """Merge Crux content into AGENTS.md without destroying existing content.
+
+    Uses delimiters to identify the Crux-managed section. If the target file
+    exists with user content, the Crux section is appended (or replaced if
+    already present). If the target is a symlink (from older Crux installs),
+    it's converted to a regular file with the symlink's content.
+    """
+    crux_content = Path(source).read_text()
+    crux_section = f"{CRUX_AGENTS_START}\n{crux_content}\n{CRUX_AGENTS_END}\n"
+
+    # If target is a symlink (legacy Crux install), resolve it first
+    if os.path.islink(target):
+        existing = Path(target).read_text()
+        os.remove(target)
+        # If the symlink pointed to our own template, just write the delimited version
+        if existing.strip() == crux_content.strip():
+            existing = ""
+        Path(target).write_text(existing + "\n" + crux_section if existing.strip() else crux_section)
+        return
+
+    # If target doesn't exist, just write the Crux section
+    if not os.path.exists(target):
+        Path(target).write_text(crux_section)
+        return
+
+    # Target exists as a regular file — merge
+    existing = Path(target).read_text()
+
+    if CRUX_AGENTS_START in existing and CRUX_AGENTS_END in existing:
+        # Replace existing Crux section
+        start_idx = existing.index(CRUX_AGENTS_START)
+        end_idx = existing.index(CRUX_AGENTS_END) + len(CRUX_AGENTS_END)
+        # Consume trailing newline if present
+        if end_idx < len(existing) and existing[end_idx] == "\n":
+            end_idx += 1
+        updated = existing[:start_idx] + crux_section + existing[end_idx:]
+    else:
+        # Append Crux section
+        separator = "\n" if existing.strip() else ""
+        updated = existing.rstrip() + separator + "\n" + crux_section
+
+    Path(target).write_text(updated)
+
+
 def sync_opencode(project_dir: str, home: str) -> SyncResult:
     """Generate ~/.config/opencode/ configs from .crux/."""
     user_paths = get_user_paths(home)
@@ -155,6 +209,12 @@ def sync_opencode(project_dir: str, home: str) -> SyncResult:
     if os.path.isdir(know_source):
         _safe_symlink(know_source, os.path.join(config_dir, "knowledge"))
         items.append("knowledge")
+
+    # Merge Crux section into AGENTS.md (preserves existing user content)
+    agents_md_source = os.path.join(_crux_repo_root(), "templates", "AGENTS.md")
+    if os.path.isfile(agents_md_source):
+        _merge_agents_md(agents_md_source, os.path.join(config_dir, "AGENTS.md"))
+        items.append("AGENTS.md")
 
     # Write MCP config into opencode.json
     _write_opencode_mcp_config(config_dir, project_dir, home)
@@ -180,8 +240,7 @@ def _write_opencode_mcp_config(config_dir: str, project_dir: str, home: str) -> 
 
     # Build the Crux MCP entry in OpenCode format
     python_path = sys.executable
-    # Find the crux repo root (where scripts/ lives) for PYTHONPATH
-    crux_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    crux_repo = _crux_repo_root()
     crux_mcp: dict = {
         "type": "local",
         "command": [python_path, "-m", "scripts.lib.crux_mcp_server"],
@@ -269,6 +328,143 @@ def sync_claude_code(project_dir: str, home: str) -> SyncResult:
     return SyncResult(success=True, tool="claude-code", items_synced=items)
 
 
+def _build_context_md(project_dir: str) -> str:
+    """Build a markdown context document from session state."""
+    project_paths = get_project_paths(project_dir)
+    session = load_session(str(project_paths.root))
+    handoff = read_handoff(str(project_paths.root))
+
+    lines = ["# Crux Session Context\n"]
+    lines.append(f"**Active mode:** {session.active_mode}")
+    if session.working_on:
+        lines.append(f"**Working on:** {session.working_on}")
+    if session.key_decisions:
+        lines.append("\n**Key decisions:**")
+        for d in session.key_decisions:
+            lines.append(f"- {d}")
+    if session.files_touched:
+        lines.append("\n**Files touched:**")
+        for f in session.files_touched:
+            lines.append(f"- {f}")
+    if session.pending:
+        lines.append("\n**Pending:**")
+        for p in session.pending:
+            lines.append(f"- {p}")
+    if handoff:
+        lines.append(f"\n**Handoff context:**\n{handoff}")
+    return "\n".join(lines) + "\n"
+
+
+def _write_mcp_config(config_path: str, project_dir: str, home: str) -> None:
+    """Write or merge Crux MCP server entry into a JSON config file."""
+    import sys
+
+    existing: dict = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    python_path = sys.executable
+    crux_repo = _crux_repo_root()
+    crux_mcp: dict = {
+        "command": python_path,
+        "args": ["-m", "scripts.lib.crux_mcp_server"],
+        "env": {
+            "CRUX_PROJECT": project_dir,
+            "CRUX_HOME": home,
+            "PYTHONPATH": crux_repo,
+        },
+    }
+
+    if "mcpServers" not in existing:
+        existing["mcpServers"] = {}
+    existing["mcpServers"]["crux"] = crux_mcp
+
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(existing, f, indent=2)
+
+
+def sync_cursor(project_dir: str, home: str) -> SyncResult:
+    """Generate .cursor/ configs from .crux/ data."""
+    user_paths = get_user_paths(home)
+    cursor_dir = os.path.join(project_dir, ".cursor")
+    rules_dir = os.path.join(cursor_dir, "rules")
+    os.makedirs(rules_dir, exist_ok=True)
+    items: list[str] = []
+
+    # Mode prompts → Cursor rules (plain markdown, no frontmatter)
+    modes_dir = user_paths.modes
+    if os.path.isdir(modes_dir):
+        for mode_file in Path(modes_dir).glob("*.md"):
+            body = strip_frontmatter(mode_file.read_text()).strip()
+            rule_path = os.path.join(rules_dir, f"{mode_file.stem}.md")
+            _safe_write(rule_path, body + "\n")
+            items.append(f"rule:{mode_file.stem}")
+
+    # Context rule
+    context_md = _build_context_md(project_dir)
+    _safe_write(os.path.join(rules_dir, "crux-context.md"), context_md)
+    items.append("crux-context")
+
+    # Register MCP server in .cursor/mcp.json
+    mcp_config_path = os.path.join(cursor_dir, "mcp.json")
+    _write_mcp_config(mcp_config_path, project_dir, home)
+    items.append("mcp-config")
+
+    # Merge AGENTS.md into Cursor rules
+    agents_md_source = os.path.join(_crux_repo_root(), "templates", "AGENTS.md")
+    if os.path.isfile(agents_md_source):
+        _merge_agents_md(agents_md_source, os.path.join(rules_dir, "crux-agent.md"))
+        items.append("crux-agent")
+
+    return SyncResult(success=True, tool="cursor", items_synced=items)
+
+
+def sync_windsurf(project_dir: str, home: str) -> SyncResult:
+    """Generate .windsurf/ configs from .crux/ data.
+
+    Windsurf uses:
+    - .windsurf/rules/ for custom instructions (markdown files)
+    - .windsurf/mcp.json for MCP server registration
+    """
+    user_paths = get_user_paths(home)
+    windsurf_dir = os.path.join(project_dir, ".windsurf")
+    rules_dir = os.path.join(windsurf_dir, "rules")
+    os.makedirs(rules_dir, exist_ok=True)
+    items: list[str] = []
+
+    # Mode prompts → Windsurf rules (plain markdown)
+    modes_dir = user_paths.modes
+    if os.path.isdir(modes_dir):
+        for mode_file in Path(modes_dir).glob("*.md"):
+            body = strip_frontmatter(mode_file.read_text()).strip()
+            rule_path = os.path.join(rules_dir, f"{mode_file.stem}.md")
+            _safe_write(rule_path, body + "\n")
+            items.append(f"rule:{mode_file.stem}")
+
+    # Context rule
+    context_md = _build_context_md(project_dir)
+    _safe_write(os.path.join(rules_dir, "crux-context.md"), context_md)
+    items.append("crux-context")
+
+    # MCP config
+    mcp_config_path = os.path.join(windsurf_dir, "mcp.json")
+    _write_mcp_config(mcp_config_path, project_dir, home)
+    items.append("mcp-config")
+
+    # Merge AGENTS.md
+    agents_md_source = os.path.join(_crux_repo_root(), "templates", "AGENTS.md")
+    if os.path.isfile(agents_md_source):
+        _merge_agents_md(agents_md_source, os.path.join(rules_dir, "crux-agent.md"))
+        items.append("crux-agent")
+
+    return SyncResult(success=True, tool="windsurf", items_synced=items)
+
+
 def sync_tool(
     tool_name: str,
     project_dir: str,
@@ -284,12 +480,14 @@ def sync_tool(
 
     project_paths = get_project_paths(project_dir)
 
-    if tool_name == "opencode":
-        result = sync_opencode(project_dir=project_dir, home=home)
-    elif tool_name == "claude-code":
-        result = sync_claude_code(project_dir=project_dir, home=home)
-    else:  # pragma: no cover — guarded by earlier SUPPORTED_TOOLS check
-        return SyncResult(success=False, tool=tool_name, error=f"Unsupported tool: '{tool_name}'")
+    dispatchers = {
+        "opencode": sync_opencode,
+        "claude-code": sync_claude_code,
+        "cursor": sync_cursor,
+        "windsurf": sync_windsurf,
+    }
+
+    result = dispatchers[tool_name](project_dir=project_dir, home=home)
 
     # Update session to reflect the active tool
     if result.success:
