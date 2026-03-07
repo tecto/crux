@@ -1,9 +1,18 @@
-"""Audit backend abstraction for Gates 4-5 (PLAN-169, PLAN-170).
+"""Audit backend abstraction for Gates 4-5 (PLAN-169, PLAN-170, PLAN-182).
 
 Provides graceful fallback from Ollama to Claude Code subagent when
 local LLM is unavailable. Prevents silent audit skipping.
 
-PLAN-170: OpenCode mode enforces Ollama requirement - no fallback allowed.
+PLAN-170: OpenCode mode enforces audit requirement - no silent skipping.
+PLAN-182: Flexible API backends (Anthropic, OpenAI) for adversarial auditing.
+          Supports pure API mode, hybrid mode, and multi-key configurations.
+
+Environment Variables (PLAN-182):
+    CRUX_AUDIT_BACKEND: Primary backend (ollama|anthropic|openai|subagent)
+    CRUX_ADVERSARIAL_BACKEND: Adversarial backend (ollama|anthropic|openai|subagent)
+    CRUX_ANTHROPIC_API_KEY: API key for Anthropic (or use ANTHROPIC_API_KEY)
+    CRUX_OPENAI_API_KEY: API key for OpenAI (or use OPENAI_API_KEY)
+    CRUX_ADVERSARIAL_MODEL: Model for adversarial audit
 """
 
 from __future__ import annotations
@@ -162,6 +171,238 @@ class OllamaBackend:
             backend=self.name,
             model=self._model,
         )
+
+
+# ---------------------------------------------------------------------------
+# Anthropic API Backend (PLAN-182)
+# ---------------------------------------------------------------------------
+
+
+class AnthropicBackend:
+    """Audit backend using Anthropic API (Claude models).
+
+    Uses the Anthropic SDK to call Claude models for adversarial auditing.
+    Supports both CRUX_ANTHROPIC_API_KEY and ANTHROPIC_API_KEY env vars.
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-3-haiku-20240307",
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key or os.environ.get(
+            "CRUX_ANTHROPIC_API_KEY",
+            os.environ.get("ANTHROPIC_API_KEY", ""),
+        )
+        self._client = None
+
+    @property
+    def name(self) -> str:
+        return f"Anthropic ({self._model})"
+
+    def is_available(self) -> bool:
+        """Check if Anthropic API is available (API key set)."""
+        return bool(self._api_key)
+
+    def _get_client(self):
+        """Lazy-load the Anthropic client."""
+        if self._client is None:
+            try:
+                from anthropic import Anthropic
+                self._client = Anthropic(api_key=self._api_key)
+            except ImportError:
+                _logger.warning("anthropic package not installed")
+                return None
+        return self._client
+
+    def audit(
+        self,
+        script_content: str,
+        risk_level: str,
+        system_prompt: str,
+    ) -> AuditResult:
+        if not self._api_key:
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason="Anthropic API key not configured",
+                backend=self.name,
+            )
+
+        client = self._get_client()
+        if client is None:
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason="anthropic package not installed (pip install anthropic)",
+                backend=self.name,
+            )
+
+        prompt = _format_audit_prompt(script_content, risk_level)
+
+        try:
+            message = client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            response_text = message.content[0].text
+            parsed = _parse_audit_response(response_text)
+
+            if parsed is None:
+                return AuditResult(
+                    passed=True,
+                    skipped=True,
+                    reason="Could not parse Anthropic response as JSON",
+                    backend=self.name,
+                )
+
+            findings = [
+                AuditFinding(
+                    severity=f.get("severity", "medium"),
+                    title=f.get("title", "Unknown"),
+                    description=f.get("description", ""),
+                )
+                for f in parsed.get("findings", [])
+            ]
+
+            return AuditResult(
+                passed=parsed.get("passed", True),
+                skipped=False,
+                findings=findings,
+                summary=parsed.get("summary", ""),
+                backend=self.name,
+                model=self._model,
+            )
+
+        except Exception as exc:
+            _logger.debug("Anthropic audit failed: %s", exc)
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason=f"Anthropic API error: {exc}",
+                backend=self.name,
+            )
+
+
+# ---------------------------------------------------------------------------
+# OpenAI API Backend (PLAN-182)
+# ---------------------------------------------------------------------------
+
+
+class OpenAIBackend:
+    """Audit backend using OpenAI API (GPT models).
+
+    Uses the OpenAI SDK to call GPT models for adversarial auditing.
+    Supports both CRUX_OPENAI_API_KEY and OPENAI_API_KEY env vars.
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key or os.environ.get(
+            "CRUX_OPENAI_API_KEY",
+            os.environ.get("OPENAI_API_KEY", ""),
+        )
+        self._client = None
+
+    @property
+    def name(self) -> str:
+        return f"OpenAI ({self._model})"
+
+    def is_available(self) -> bool:
+        """Check if OpenAI API is available (API key set)."""
+        return bool(self._api_key)
+
+    def _get_client(self):
+        """Lazy-load the OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import OpenAI
+                self._client = OpenAI(api_key=self._api_key)
+            except ImportError:
+                _logger.warning("openai package not installed")
+                return None
+        return self._client
+
+    def audit(
+        self,
+        script_content: str,
+        risk_level: str,
+        system_prompt: str,
+    ) -> AuditResult:
+        if not self._api_key:
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason="OpenAI API key not configured",
+                backend=self.name,
+            )
+
+        client = self._get_client()
+        if client is None:
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason="openai package not installed (pip install openai)",
+                backend=self.name,
+            )
+
+        prompt = _format_audit_prompt(script_content, risk_level)
+
+        try:
+            response = client.chat.completions.create(
+                model=self._model,
+                max_tokens=1024,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+
+            response_text = response.choices[0].message.content
+            parsed = _parse_audit_response(response_text)
+
+            if parsed is None:
+                return AuditResult(
+                    passed=True,
+                    skipped=True,
+                    reason="Could not parse OpenAI response as JSON",
+                    backend=self.name,
+                )
+
+            findings = [
+                AuditFinding(
+                    severity=f.get("severity", "medium"),
+                    title=f.get("title", "Unknown"),
+                    description=f.get("description", ""),
+                )
+                for f in parsed.get("findings", [])
+            ]
+
+            return AuditResult(
+                passed=parsed.get("passed", True),
+                skipped=False,
+                findings=findings,
+                summary=parsed.get("summary", ""),
+                backend=self.name,
+                model=self._model,
+            )
+
+        except Exception as exc:
+            _logger.debug("OpenAI audit failed: %s", exc)
+            return AuditResult(
+                passed=True,
+                skipped=True,
+                reason=f"OpenAI API error: {exc}",
+                backend=self.name,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -422,34 +663,87 @@ def detect_context_mode() -> str:
 _cached_backend: AuditBackend | None = None
 _cached_backend_check_time: float = 0
 
+# Backend name to class mapping
+_BACKEND_CLASSES: dict[str, type] = {
+    "ollama": OllamaBackend,
+    "anthropic": AnthropicBackend,
+    "openai": OpenAIBackend,
+    "subagent": ClaudeSubagentBackend,
+}
+
+
+def _create_backend(
+    backend_type: str,
+    model: str | None = None,
+) -> AuditBackend | None:
+    """Create a backend instance by type name.
+
+    Args:
+        backend_type: One of "ollama", "anthropic", "openai", "subagent"
+        model: Optional model override
+
+    Returns:
+        Backend instance or None if type unknown
+    """
+    backend_type = backend_type.lower()
+    cls = _BACKEND_CLASSES.get(backend_type)
+    if cls is None:
+        return None
+
+    if backend_type == "ollama":
+        return cls(model=model or "qwen3:8b")
+    elif backend_type == "anthropic":
+        return cls(model=model or "claude-3-haiku-20240307")
+    elif backend_type == "openai":
+        return cls(model=model or "gpt-4o-mini")
+    elif backend_type == "subagent":
+        return cls()
+    return None
+
+
+def get_configured_backend() -> tuple[str | None, str | None]:
+    """Get configured backend from environment variables.
+
+    Returns:
+        Tuple of (primary_backend, adversarial_backend) names, or None if not configured
+    """
+    primary = os.environ.get("CRUX_AUDIT_BACKEND", "").lower() or None
+    adversarial = os.environ.get("CRUX_ADVERSARIAL_BACKEND", "").lower() or None
+    return primary, adversarial
+
 
 def get_audit_backend(
     force_refresh: bool = False,
     prefer_ollama_model: str = "qwen3:8b",
     context: str = "auto",
     enforce_opencode: bool = True,
+    role: str = "primary",
 ) -> AuditBackend:
     """Get the best available audit backend.
 
-    Priority:
+    PLAN-182: Supports flexible backend configuration via environment variables.
+    Priority (when no env var configured):
     1. Ollama (local, fast, private, free)
-    2. Claude Code subagent (requires Claude CLI) - NOT available in OpenCode mode
-    3. Disabled (explicit warning, no silent skipping) - NOT available in OpenCode mode
+    2. Anthropic API (if ANTHROPIC_API_KEY set)
+    3. OpenAI API (if OPENAI_API_KEY set)
+    4. Claude Code subagent (requires Claude CLI) - NOT in OpenCode mode
+    5. Disabled (explicit warning, no silent skipping) - NOT in OpenCode mode
 
-    PLAN-170: In OpenCode mode, Ollama is REQUIRED. If unavailable, raises
-    AuditRequiredError instead of falling back.
+    PLAN-170: In OpenCode mode, SOME audit backend is REQUIRED.
+    PLAN-182: OpenCode now accepts API backends (not just Ollama).
 
     Args:
         force_refresh: If True, re-check backend availability
         prefer_ollama_model: Ollama model to use if available
         context: "auto", "opencode", or "claude-code" - determines enforcement
         enforce_opencode: If False, skip OpenCode enforcement (for testing)
+        role: "primary" or "adversarial" - which backend to get
 
     Returns:
         The best available AuditBackend instance
 
     Raises:
-        AuditRequiredError: In OpenCode mode when Ollama is not available
+        AuditRequiredError: In OpenCode mode when no audit backend is available
     """
     global _cached_backend, _cached_backend_check_time
 
@@ -464,52 +758,141 @@ def get_audit_backend(
     elif context == "opencode":
         is_opencode = True
 
+    # Check for explicit backend configuration (PLAN-182)
+    primary_config, adversarial_config = get_configured_backend()
+    configured_type = adversarial_config if role == "adversarial" else primary_config
+
+    # Get adversarial model if specified
+    adversarial_model = os.environ.get("CRUX_ADVERSARIAL_MODEL")
+
+    # If backend explicitly configured, try to use it
+    if configured_type:
+        model = adversarial_model if role == "adversarial" else prefer_ollama_model
+        backend = _create_backend(configured_type, model)
+        if backend and backend.is_available():
+            _logger.debug("Using configured %s backend: %s", role, backend.name)
+            if role == "primary":
+                _cached_backend = backend
+                _cached_backend_check_time = now
+            return backend
+        elif is_opencode and enforce_opencode:
+            raise AuditRequiredError(
+                f"Configured {role} backend '{configured_type}' is not available.\n"
+                f"\n"
+                f"Check your configuration:\n"
+                f"  - CRUX_AUDIT_BACKEND={primary_config or 'not set'}\n"
+                f"  - CRUX_ADVERSARIAL_BACKEND={adversarial_config or 'not set'}\n"
+                f"\n"
+                f"Ensure API keys are set if using API backends:\n"
+                f"  - ANTHROPIC_API_KEY or CRUX_ANTHROPIC_API_KEY\n"
+                f"  - OPENAI_API_KEY or CRUX_OPENAI_API_KEY\n"
+            )
+
     # Cache backend for 60 seconds to avoid repeated checks
     # But don't use cache if context changed or we need to enforce
     if (
         not force_refresh
         and _cached_backend is not None
         and (now - _cached_backend_check_time) < 60
+        and role == "primary"
         and not (is_opencode and enforce_opencode and isinstance(_cached_backend, DisabledBackend))
     ):
         return _cached_backend
 
-    # Try Ollama first
+    # Auto-discovery: try backends in priority order
+    # 1. Ollama (local, fast, private, free)
     ollama = OllamaBackend(model=prefer_ollama_model)
     if ollama.is_available():
-        _cached_backend = ollama
-        _cached_backend_check_time = now
+        if role == "primary":
+            _cached_backend = ollama
+            _cached_backend_check_time = now
         _logger.debug("Using Ollama backend: %s", ollama.name)
         return ollama
 
-    # PLAN-170: OpenCode mode requires Ollama - no fallback
+    # 2. Anthropic API (PLAN-182)
+    anthropic = AnthropicBackend(
+        model=adversarial_model if role == "adversarial" else "claude-3-haiku-20240307"
+    )
+    if anthropic.is_available():
+        if role == "primary":
+            _cached_backend = anthropic
+            _cached_backend_check_time = now
+        _logger.debug("Using Anthropic backend: %s", anthropic.name)
+        return anthropic
+
+    # 3. OpenAI API (PLAN-182)
+    openai_backend = OpenAIBackend(
+        model=adversarial_model if role == "adversarial" else "gpt-4o-mini"
+    )
+    if openai_backend.is_available():
+        if role == "primary":
+            _cached_backend = openai_backend
+            _cached_backend_check_time = now
+        _logger.debug("Using OpenAI backend: %s", openai_backend.name)
+        return openai_backend
+
+    # PLAN-170/182: OpenCode mode requires SOME audit backend
     if is_opencode and enforce_opencode:
         raise AuditRequiredError(
-            "OpenCode requires local Ollama for adversarial auditing.\n"
+            "OpenCode requires an audit backend for adversarial auditing.\n"
             "\n"
-            "To fix:\n"
-            "  1. Start Ollama: ollama serve\n"
-            "  2. Pull audit model: ollama pull qwen3:8b\n"
-            "  3. Verify: curl http://localhost:11434/api/tags\n"
+            "Available options:\n"
+            "  1. Local Ollama:\n"
+            "     ollama serve && ollama pull qwen3:8b\n"
             "\n"
-            "OpenCode uses local models only - Claude subagent fallback is not available.\n"
-            "This ensures your audit is performed by an independent local model."
+            "  2. Anthropic API:\n"
+            "     export ANTHROPIC_API_KEY=sk-ant-...\n"
+            "\n"
+            "  3. OpenAI API:\n"
+            "     export OPENAI_API_KEY=sk-...\n"
+            "\n"
+            "Configure explicitly with:\n"
+            "  export CRUX_AUDIT_BACKEND=ollama|anthropic|openai\n"
+            "  export CRUX_ADVERSARIAL_BACKEND=anthropic  # for hybrid mode\n"
         )
 
-    # Try Claude subagent (Claude Code mode only)
+    # 4. Claude subagent (Claude Code mode only)
     claude = ClaudeSubagentBackend()
     if claude.is_available():
-        _cached_backend = claude
-        _cached_backend_check_time = now
+        if role == "primary":
+            _cached_backend = claude
+            _cached_backend_check_time = now
         _logger.debug("Using Claude subagent backend")
         return claude
 
-    # Fall back to disabled (Claude Code mode only)
+    # 5. Fall back to disabled (Claude Code mode only)
     disabled = DisabledBackend()
-    _cached_backend = disabled
-    _cached_backend_check_time = now
+    if role == "primary":
+        _cached_backend = disabled
+        _cached_backend_check_time = now
     _logger.warning("No audit backend available - using disabled backend")
     return disabled
+
+
+def get_adversarial_backend(
+    force_refresh: bool = False,
+    context: str = "auto",
+    enforce: bool = True,
+) -> AuditBackend:
+    """Get the adversarial audit backend.
+
+    PLAN-182: Returns the backend configured for adversarial role,
+    which may be different from the primary backend.
+
+    Args:
+        force_refresh: If True, re-check backend availability
+        context: "auto", "opencode", or "claude-code"
+        enforce: If True, raise AuditRequiredError if no backend available
+
+    Returns:
+        The adversarial AuditBackend instance
+    """
+    return get_audit_backend(
+        force_refresh=force_refresh,
+        context=context,
+        enforce_opencode=enforce,
+        role="adversarial",
+    )
 
 
 def get_backend_status() -> dict:
@@ -519,39 +902,68 @@ def get_backend_status() -> dict:
         Dict with backend availability, active backend, and mode info
     """
     ollama = OllamaBackend()
+    anthropic = AnthropicBackend()
+    openai_backend = OpenAIBackend()
     claude = ClaudeSubagentBackend()
 
     ollama_available = ollama.is_available()
+    anthropic_available = anthropic.is_available()
+    openai_available = openai_backend.is_available()
     claude_available = claude.is_available()
     context_mode = detect_context_mode()
     is_opencode = context_mode == "opencode"
 
+    # Get configured backends (PLAN-182)
+    primary_config, adversarial_config = get_configured_backend()
+
+    # Any API backend available counts as having an audit option
+    any_backend_available = (
+        ollama_available or anthropic_available or openai_available or claude_available
+    )
+
     # Determine active backend (with enforcement disabled for status check)
     try:
-        active = get_audit_backend(enforce_opencode=False)
+        active = get_audit_backend(enforce_opencode=False, force_refresh=True)
         active_name = active.name
         audit_blocked = False
     except AuditRequiredError:
-        active_name = "BLOCKED (Ollama required)"
+        active_name = "BLOCKED (no backend available)"
         audit_blocked = True
 
     # Check if audit would be blocked in current mode
-    if is_opencode and not ollama_available:
+    # PLAN-182: OpenCode now accepts API backends, not just Ollama
+    if is_opencode and not any_backend_available:
         audit_blocked = True
-        active_name = "BLOCKED (Ollama required for OpenCode)"
+        active_name = "BLOCKED (no audit backend for OpenCode)"
 
     return {
         "active_backend": active_name,
         "ollama_available": ollama_available,
+        "anthropic_available": anthropic_available,
+        "openai_available": openai_available,
         "claude_available": claude_available,
         "context_mode": context_mode,
-        "ollama_required": is_opencode,
+        "audit_required": is_opencode,
         "audit_blocked": audit_blocked,
+        "configured": {
+            "primary": primary_config,
+            "adversarial": adversarial_config,
+        },
         "backends": {
             "ollama": {
                 "available": ollama_available,
                 "name": ollama.name,
-                "required_in": ["opencode"],
+                "available_in": ["opencode", "claude-code", "both"],
+            },
+            "anthropic": {
+                "available": anthropic_available,
+                "name": anthropic.name,
+                "available_in": ["opencode", "claude-code", "both"],
+            },
+            "openai": {
+                "available": openai_available,
+                "name": openai_backend.name,
+                "available_in": ["opencode", "claude-code", "both"],
             },
             "claude": {
                 "available": claude_available,

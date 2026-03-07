@@ -1,4 +1,4 @@
-"""Tests for audit backend abstraction (PLAN-169, PLAN-170)."""
+"""Tests for audit backend abstraction (PLAN-169, PLAN-170, PLAN-182)."""
 
 from __future__ import annotations
 
@@ -12,16 +12,32 @@ from scripts.lib.crux_audit_backend import (
     AuditFinding,
     AuditRequiredError,
     AuditResult,
+    AnthropicBackend,
     ClaudeSubagentBackend,
     DisabledBackend,
     OllamaBackend,
+    OpenAIBackend,
     _format_audit_prompt,
     _parse_audit_response,
+    _create_backend,
     detect_context_mode,
     detect_opencode_context,
+    get_adversarial_backend,
     get_audit_backend,
     get_backend_status,
+    get_configured_backend,
 )
+import scripts.lib.crux_audit_backend as audit_backend_mod
+
+
+@pytest.fixture(autouse=True)
+def reset_backend_cache():
+    """Reset the backend cache before each test to ensure isolation."""
+    audit_backend_mod._cached_backend = None
+    audit_backend_mod._cached_backend_check_time = 0
+    yield
+    audit_backend_mod._cached_backend = None
+    audit_backend_mod._cached_backend_check_time = 0
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +201,173 @@ class TestClaudeSubagentBackend:
 
 
 # ---------------------------------------------------------------------------
+# AnthropicBackend tests (PLAN-182)
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicBackend:
+    def test_name_includes_model(self):
+        backend = AnthropicBackend(model="claude-3-haiku-20240307")
+        assert "claude-3-haiku" in backend.name
+        assert "Anthropic" in backend.name
+
+    def test_is_available_with_api_key(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            assert backend.is_available() is True
+
+    def test_is_available_with_crux_api_key(self):
+        with patch.dict("os.environ", {"CRUX_ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            backend = AnthropicBackend()
+            assert backend.is_available() is True
+
+    def test_is_unavailable_without_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            backend = AnthropicBackend()
+            assert backend.is_available() is False
+
+    def test_audit_without_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            backend = AnthropicBackend()
+            result = backend.audit("echo hello", "low", "system prompt")
+            assert result.skipped is True
+            assert "API key" in result.reason
+
+    def test_audit_without_package(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            with patch.object(backend, "_get_client", return_value=None):
+                result = backend.audit("echo hello", "low", "system prompt")
+                assert result.skipped is True
+                assert "not installed" in result.reason
+
+    def test_audit_success(self):
+        mock_client = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(text=json.dumps({
+            "passed": True,
+            "findings": [],
+            "summary": "No issues found",
+        }))]
+        mock_client.messages.create.return_value = mock_message
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.passed is True
+            assert result.skipped is False
+            assert "Anthropic" in result.backend
+
+    def test_audit_with_findings(self):
+        mock_client = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(text=json.dumps({
+            "passed": False,
+            "findings": [{"severity": "high", "title": "Issue", "description": "Bad"}],
+            "summary": "Found issues",
+        }))]
+        mock_client.messages.create.return_value = mock_message
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            backend._client = mock_client
+            result = backend.audit("rm -rf /", "high", "system prompt")
+
+            assert result.passed is False
+            assert len(result.findings) == 1
+            assert result.findings[0].severity == "high"
+
+    def test_implements_protocol(self):
+        backend = AnthropicBackend()
+        assert isinstance(backend, AuditBackend)
+
+
+# ---------------------------------------------------------------------------
+# OpenAIBackend tests (PLAN-182)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIBackend:
+    def test_name_includes_model(self):
+        backend = OpenAIBackend(model="gpt-4o-mini")
+        assert "gpt-4o-mini" in backend.name
+        assert "OpenAI" in backend.name
+
+    def test_is_available_with_api_key(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            assert backend.is_available() is True
+
+    def test_is_available_with_crux_api_key(self):
+        with patch.dict("os.environ", {"CRUX_OPENAI_API_KEY": "sk-test"}, clear=True):
+            backend = OpenAIBackend()
+            assert backend.is_available() is True
+
+    def test_is_unavailable_without_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            backend = OpenAIBackend()
+            assert backend.is_available() is False
+
+    def test_audit_without_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            backend = OpenAIBackend()
+            result = backend.audit("echo hello", "low", "system prompt")
+            assert result.skipped is True
+            assert "API key" in result.reason
+
+    def test_audit_without_package(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            with patch.object(backend, "_get_client", return_value=None):
+                result = backend.audit("echo hello", "low", "system prompt")
+                assert result.skipped is True
+                assert "not installed" in result.reason
+
+    def test_audit_success(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps({
+            "passed": True,
+            "findings": [],
+            "summary": "No issues found",
+        })))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.passed is True
+            assert result.skipped is False
+            assert "OpenAI" in result.backend
+
+    def test_audit_with_findings(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps({
+            "passed": False,
+            "findings": [{"severity": "medium", "title": "Warning", "description": "Check this"}],
+            "summary": "Review needed",
+        })))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            backend._client = mock_client
+            result = backend.audit("curl $URL", "medium", "system prompt")
+
+            assert result.passed is False
+            assert len(result.findings) == 1
+
+    def test_implements_protocol(self):
+        backend = OpenAIBackend()
+        assert isinstance(backend, AuditBackend)
+
+
+# ---------------------------------------------------------------------------
 # DisabledBackend tests
 # ---------------------------------------------------------------------------
 
@@ -230,12 +413,10 @@ class TestGetAuditBackend:
         mock_check.return_value = False
         mock_find.return_value = "/usr/local/bin/claude"
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
-
-        backend = get_audit_backend(force_refresh=True)
-        assert isinstance(backend, ClaudeSubagentBackend)
+        # Clear API keys so Claude subagent is the fallback
+        with patch.dict("os.environ", {}, clear=True):
+            backend = get_audit_backend(force_refresh=True)
+            assert isinstance(backend, ClaudeSubagentBackend)
 
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
     @patch.object(ClaudeSubagentBackend, "_find_claude_binary")
@@ -243,12 +424,10 @@ class TestGetAuditBackend:
         mock_check.return_value = False
         mock_find.return_value = None
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
-
-        backend = get_audit_backend(force_refresh=True)
-        assert isinstance(backend, DisabledBackend)
+        # Clear API keys so DisabledBackend is the fallback
+        with patch.dict("os.environ", {}, clear=True):
+            backend = get_audit_backend(force_refresh=True)
+            assert isinstance(backend, DisabledBackend)
 
 
 class TestGetBackendStatus:
@@ -359,30 +538,26 @@ class TestOpenCodeDetection:
 class TestOpenCodeEnforcement:
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
     @patch("scripts.lib.crux_audit_backend.detect_opencode_context")
-    def test_opencode_raises_when_ollama_unavailable(self, mock_detect, mock_check):
+    def test_opencode_raises_when_no_backend_available(self, mock_detect, mock_check):
         mock_detect.return_value = True
         mock_check.return_value = False
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
+        # Clear all API keys too
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(AuditRequiredError) as exc_info:
+                get_audit_backend(force_refresh=True, context="auto")
 
-        with pytest.raises(AuditRequiredError) as exc_info:
-            get_audit_backend(force_refresh=True, context="auto")
-
-        assert "OpenCode requires local Ollama" in str(exc_info.value)
-        assert "ollama serve" in str(exc_info.value)
+            # PLAN-182: error message now mentions multiple options
+            assert "audit backend" in str(exc_info.value).lower()
 
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
-    def test_opencode_explicit_context_raises(self, mock_check):
+    def test_opencode_explicit_context_raises_when_no_backend(self, mock_check):
         mock_check.return_value = False
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
-
-        with pytest.raises(AuditRequiredError):
-            get_audit_backend(force_refresh=True, context="opencode")
+        # Clear all API keys
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(AuditRequiredError):
+                get_audit_backend(force_refresh=True, context="opencode")
 
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
     def test_opencode_with_ollama_works(self, mock_check):
@@ -401,13 +576,11 @@ class TestOpenCodeEnforcement:
         mock_check.return_value = False
         mock_find.return_value = "/usr/local/bin/claude"
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
-
-        # Claude Code mode should still fall back
-        backend = get_audit_backend(force_refresh=True, context="claude-code")
-        assert isinstance(backend, ClaudeSubagentBackend)
+        # Clear API keys so Claude subagent is the fallback
+        with patch.dict("os.environ", {}, clear=True):
+            # Claude Code mode should still fall back
+            backend = get_audit_backend(force_refresh=True, context="claude-code")
+            assert isinstance(backend, ClaudeSubagentBackend)
 
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
     @patch.object(ClaudeSubagentBackend, "_find_claude_binary")
@@ -415,18 +588,16 @@ class TestOpenCodeEnforcement:
         mock_check.return_value = False
         mock_find.return_value = None  # No Claude either
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
-
-        # With enforce_opencode=False, should not raise even in opencode context
-        backend = get_audit_backend(
-            force_refresh=True,
-            context="opencode",
-            enforce_opencode=False,
-        )
-        # Falls through to DisabledBackend since both Ollama and Claude unavailable
-        assert isinstance(backend, DisabledBackend)
+        # Clear API keys so DisabledBackend is the fallback
+        with patch.dict("os.environ", {}, clear=True):
+            # With enforce_opencode=False, should not raise even in opencode context
+            backend = get_audit_backend(
+                force_refresh=True,
+                context="opencode",
+                enforce_opencode=False,
+            )
+            # Falls through to DisabledBackend since both Ollama and Claude unavailable
+            assert isinstance(backend, DisabledBackend)
 
 
 class TestBackendStatusWithMode:
@@ -438,16 +609,14 @@ class TestBackendStatusWithMode:
         mock_mode.return_value = "opencode"
         mock_find.return_value = None
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
+        # Clear API keys so no backend is available
+        with patch.dict("os.environ", {}, clear=True):
+            status = get_backend_status()
 
-        status = get_backend_status()
-
-        assert status["context_mode"] == "opencode"
-        assert status["ollama_required"] is True
-        assert status["audit_blocked"] is True
-        assert "BLOCKED" in status["active_backend"]
+            assert status["context_mode"] == "opencode"
+            assert status["audit_required"] is True
+            assert status["audit_blocked"] is True
+            assert "BLOCKED" in status["active_backend"]
 
     @patch("scripts.lib.crux_audit_backend.check_ollama_running")
     @patch("scripts.lib.crux_audit_backend.detect_context_mode")
@@ -457,12 +626,167 @@ class TestBackendStatusWithMode:
         mock_mode.return_value = "claude-code"
         mock_find.return_value = "/usr/local/bin/claude"
 
-        import scripts.lib.crux_audit_backend as mod
-        mod._cached_backend = None
-        mod._cached_backend_check_time = 0
+        with patch.dict("os.environ", {}, clear=True):
+            status = get_backend_status()
 
-        status = get_backend_status()
+            assert status["context_mode"] == "claude-code"
+            assert status["audit_required"] is False
+            assert status["audit_blocked"] is False
 
-        assert status["context_mode"] == "claude-code"
-        assert status["ollama_required"] is False
-        assert status["audit_blocked"] is False
+
+# ---------------------------------------------------------------------------
+# PLAN-182: Flexible API backend tests
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBackend:
+    def test_creates_ollama_backend(self):
+        backend = _create_backend("ollama", "qwen3:8b")
+        assert isinstance(backend, OllamaBackend)
+        assert "qwen3:8b" in backend.name
+
+    def test_creates_anthropic_backend(self):
+        backend = _create_backend("anthropic", "claude-3-opus-20240229")
+        assert isinstance(backend, AnthropicBackend)
+        assert "claude-3-opus" in backend.name
+
+    def test_creates_openai_backend(self):
+        backend = _create_backend("openai", "gpt-4")
+        assert isinstance(backend, OpenAIBackend)
+        assert "gpt-4" in backend.name
+
+    def test_creates_subagent_backend(self):
+        backend = _create_backend("subagent")
+        assert isinstance(backend, ClaudeSubagentBackend)
+
+    def test_returns_none_for_unknown_type(self):
+        backend = _create_backend("invalid")
+        assert backend is None
+
+    def test_case_insensitive(self):
+        backend = _create_backend("OLLAMA")
+        assert isinstance(backend, OllamaBackend)
+
+
+class TestGetConfiguredBackend:
+    def test_returns_none_when_not_configured(self):
+        with patch.dict("os.environ", {}, clear=True):
+            primary, adversarial = get_configured_backend()
+            assert primary is None
+            assert adversarial is None
+
+    def test_returns_primary_backend(self):
+        with patch.dict("os.environ", {"CRUX_AUDIT_BACKEND": "anthropic"}, clear=True):
+            primary, adversarial = get_configured_backend()
+            assert primary == "anthropic"
+            assert adversarial is None
+
+    def test_returns_adversarial_backend(self):
+        with patch.dict("os.environ", {"CRUX_ADVERSARIAL_BACKEND": "openai"}, clear=True):
+            primary, adversarial = get_configured_backend()
+            assert primary is None
+            assert adversarial == "openai"
+
+    def test_returns_both_backends(self):
+        with patch.dict("os.environ", {
+            "CRUX_AUDIT_BACKEND": "ollama",
+            "CRUX_ADVERSARIAL_BACKEND": "anthropic",
+        }, clear=True):
+            primary, adversarial = get_configured_backend()
+            assert primary == "ollama"
+            assert adversarial == "anthropic"
+
+
+class TestOpenCodeWithAPIBackends:
+    """PLAN-182: OpenCode mode should accept API backends."""
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_opencode_works_with_anthropic(self, mock_check):
+        mock_check.return_value = False  # Ollama not available
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            backend = get_audit_backend(force_refresh=True, context="opencode")
+            assert isinstance(backend, AnthropicBackend)
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_opencode_works_with_openai(self, mock_check):
+        mock_check.return_value = False  # Ollama not available
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            backend = get_audit_backend(force_refresh=True, context="opencode")
+            assert isinstance(backend, OpenAIBackend)
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_opencode_prefers_ollama(self, mock_check):
+        mock_check.return_value = True  # Ollama available
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = get_audit_backend(force_refresh=True, context="opencode")
+            assert isinstance(backend, OllamaBackend)
+
+
+class TestAdversarialBackend:
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_adversarial_uses_configured_backend(self, mock_check):
+        mock_check.return_value = True  # Ollama available
+
+        with patch.dict("os.environ", {
+            "CRUX_ADVERSARIAL_BACKEND": "anthropic",
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+        }):
+            backend = get_adversarial_backend(force_refresh=True, context="claude-code")
+            assert isinstance(backend, AnthropicBackend)
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_adversarial_uses_model_config(self, mock_check):
+        mock_check.return_value = False
+
+        with patch.dict("os.environ", {
+            "CRUX_ADVERSARIAL_BACKEND": "anthropic",
+            "CRUX_ADVERSARIAL_MODEL": "claude-3-opus-20240229",
+            "ANTHROPIC_API_KEY": "sk-ant-test",
+        }):
+            backend = get_adversarial_backend(force_refresh=True, context="claude-code")
+            assert "claude-3-opus" in backend.name
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_adversarial_falls_back_to_primary(self, mock_check):
+        mock_check.return_value = True  # Ollama available
+
+        # No adversarial configured, should use same as primary
+        with patch.dict("os.environ", {}, clear=True):
+            backend = get_adversarial_backend(force_refresh=True, context="claude-code")
+            assert isinstance(backend, OllamaBackend)
+
+
+class TestBackendStatusPlan182:
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    @patch("scripts.lib.crux_audit_backend.detect_context_mode")
+    def test_status_includes_api_backends(self, mock_mode, mock_check):
+        mock_check.return_value = False
+        mock_mode.return_value = "claude-code"
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            status = get_backend_status()
+
+            assert "anthropic_available" in status
+            assert "openai_available" in status
+            assert status["anthropic_available"] is True
+            assert "backends" in status
+            assert "anthropic" in status["backends"]
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    @patch("scripts.lib.crux_audit_backend.detect_context_mode")
+    def test_status_includes_configured_backends(self, mock_mode, mock_check):
+        mock_check.return_value = True
+        mock_mode.return_value = "opencode"
+
+        with patch.dict("os.environ", {
+            "CRUX_AUDIT_BACKEND": "ollama",
+            "CRUX_ADVERSARIAL_BACKEND": "anthropic",
+        }):
+            status = get_backend_status()
+
+            assert "configured" in status
+            assert status["configured"]["primary"] == "ollama"
+            assert status["configured"]["adversarial"] == "anthropic"
