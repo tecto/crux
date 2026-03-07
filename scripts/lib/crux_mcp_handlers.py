@@ -660,3 +660,181 @@ def handle_figma_get_components(file_key: str, token: str) -> dict:
     """Fetch Figma components from a file."""
     from scripts.lib.crux_figma import get_file_components
     return get_file_components(file_key, token)
+
+
+# ---------------------------------------------------------------------------
+# Build-in-public
+# ---------------------------------------------------------------------------
+
+def handle_bip_generate(
+    project_dir: str,
+    home: str,
+    platform: str = "x",
+    force: bool = False,
+    event: str | None = None,
+) -> dict:
+    """Check triggers and gather content for a BIP draft.
+
+    Returns gathered context and trigger result so the LLM can generate
+    the actual draft text using the build-in-public mode voice.
+    """
+    import os
+    from scripts.lib.crux_bip_gather import gather_content
+    from scripts.lib.crux_bip_triggers import evaluate_triggers
+    from scripts.lib.crux_bip import load_state, load_config
+
+    crux_dir = os.path.join(project_dir, ".crux")
+    bip_dir = os.path.join(crux_dir, "bip")
+
+    # Check triggers
+    trigger = evaluate_triggers(bip_dir, event=event, force=force)
+
+    config = load_config(bip_dir)
+    state = load_state(bip_dir)
+
+    if not trigger.should_trigger:
+        return {
+            "status": "skipped",
+            "reason": trigger.reason,
+            "state": {
+                "commits": state.commits_since_last_post,
+                "interactions": state.interactions_since_last_post,
+                "tokens": state.tokens_since_last_post,
+                "last_queued_at": state.last_queued_at,
+                "cooldown_minutes": config.cooldown_minutes,
+            },
+        }
+
+    # Gather content
+    since = state.last_queued_at
+    ctx = gather_content(project_dir=project_dir, home=home, since=since)
+
+    return {
+        "status": "ready",
+        "trigger_reason": trigger.reason,
+        "platform": platform,
+        "context": {
+            "unposted_commits": ctx.unposted_commits[:20],
+            "commit_messages": ctx.commit_messages[:20],
+            "files_changed": ctx.files_changed[:30],
+            "corrections": [c.get("pattern", "") for c in ctx.corrections[:10]],
+            "knowledge_entries": [k["name"] for k in ctx.knowledge_entries],
+            "session_mode": ctx.session_mode,
+            "session_tool": ctx.session_tool,
+            "working_on": ctx.working_on,
+            "key_decisions": ctx.key_decisions[:10],
+        },
+        "voice": {
+            "style": config.voice_style,
+            "tone": config.voice_tone,
+            "never_words": config.never_words,
+            "hashtags": ["buildinpublic", "opensource", "aitools", "localllm", "vibecoding"],
+        },
+    }
+
+
+def handle_bip_approve(
+    project_dir: str,
+    draft_text: str,
+    source_keys: list[str] | None = None,
+    publish_at: str | None = None,
+) -> dict:
+    """Approve a BIP draft and queue it to Typefully.
+
+    Args:
+        project_dir: Project directory path.
+        draft_text: The approved draft text (single tweet or \\n\\n-separated thread).
+        source_keys: List of source keys for history dedup (e.g. ["git:abc123"]).
+        publish_at: Optional ISO 8601 timestamp for scheduled publishing.
+    """
+    import os
+    from datetime import datetime, timezone
+    from scripts.lib.crux_bip import (
+        load_state, save_state, record_history, reset_counters,
+    )
+
+    crux_dir = os.path.join(project_dir, ".crux")
+    bip_dir = os.path.join(crux_dir, "bip")
+
+    # Save draft to file
+    now = datetime.now(timezone.utc)
+    draft_filename = now.strftime("%Y%m%d-%H%M%S") + ".md"
+    drafts_dir = os.path.join(bip_dir, "drafts")
+    os.makedirs(drafts_dir, exist_ok=True)
+    draft_path = os.path.join(drafts_dir, draft_filename)
+    with open(draft_path, "w") as f:
+        f.write(draft_text)
+
+    # Try to queue to Typefully
+    queued = False
+    queue_error = None
+    draft_id = None
+    try:
+        from scripts.lib.crux_typefully import TypefullyClient, create_draft, create_thread
+
+        client = TypefullyClient(bip_dir=bip_dir)
+        tweets = [t.strip() for t in draft_text.split("\n\n") if t.strip()]
+        if len(tweets) > 1:
+            result = create_thread(client, tweets, publish_at=publish_at)
+        else:
+            result = create_draft(client, draft_text.strip(), publish_at=publish_at)
+        draft_id = result.get("id")
+        queued = True
+    except Exception as e:
+        queue_error = str(e)
+
+    # Record history
+    for key in (source_keys or []):
+        record_history(bip_dir, source_key=key, draft_preview=draft_text[:200])
+
+    # Update state
+    state = load_state(bip_dir)
+    state.last_queued_at = now.isoformat()
+    if draft_id:
+        state.last_queued_id = draft_id
+    state.posts_today += 1
+    state.posts_this_hour += 1
+    state.commits_since_last_post = 0
+    state.tokens_since_last_post = 0
+    state.interactions_since_last_post = 0
+    save_state(state, bip_dir)
+
+    return {
+        "status": "queued" if queued else "saved",
+        "draft_path": draft_path,
+        "draft_id": draft_id,
+        "queue_error": queue_error,
+    }
+
+
+def handle_bip_status(project_dir: str) -> dict:
+    """Get current BIP state — counters, cooldown, recent history."""
+    import os
+    from scripts.lib.crux_bip import load_state, load_config, load_history, check_cooldown
+
+    crux_dir = os.path.join(project_dir, ".crux")
+    bip_dir = os.path.join(crux_dir, "bip")
+    config = load_config(bip_dir)
+    state = load_state(bip_dir)
+    history = load_history(bip_dir)
+    cooldown_ok = check_cooldown(bip_dir, cooldown_minutes=config.cooldown_minutes)
+
+    return {
+        "commits_since_last_post": state.commits_since_last_post,
+        "interactions_since_last_post": state.interactions_since_last_post,
+        "tokens_since_last_post": state.tokens_since_last_post,
+        "posts_today": state.posts_today,
+        "last_queued_at": state.last_queued_at,
+        "cooldown_ok": cooldown_ok,
+        "cooldown_minutes": config.cooldown_minutes,
+        "thresholds": {
+            "commits": config.commit_threshold,
+            "interactions": config.interaction_threshold,
+            "tokens": config.token_threshold,
+        },
+        "total_posts": len(history),
+        "recent_posts": [
+            {"source": h.get("source_key", ""), "preview": h.get("draft_preview", "")[:80]}
+            for h in history[-5:]
+        ],
+    }

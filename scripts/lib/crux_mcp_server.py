@@ -48,6 +48,9 @@ from scripts.lib.crux_mcp_handlers import (
     handle_get_cross_project_digest,
     handle_figma_get_tokens,
     handle_figma_get_components,
+    handle_bip_generate,
+    handle_bip_approve,
+    handle_bip_status,
 )
 
 mcp = FastMCP("crux", instructions="Crux AI operating system — knowledge, sessions, modes, and tool switching.")
@@ -420,6 +423,59 @@ def figma_get_components(file_key: str, token: str) -> dict:
         token: Figma personal access token.
     """
     return handle_figma_get_components(file_key=file_key, token=token)
+
+
+# ---------------------------------------------------------------------------
+# Build-in-public
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def bip_generate(
+    platform: str = "x",
+    force: bool = False,
+    event: str | None = None,
+) -> dict:
+    """Check triggers and gather content for a build-in-public draft.
+
+    Returns gathered context (commits, corrections, knowledge) and voice rules.
+    Use the returned context to write a draft, then call bip_approve to queue it.
+
+    Args:
+        platform: Target platform (x, reddit, blog). Default: x.
+        force: Bypass cooldown and threshold checks.
+        event: High-signal event name (test_green, crux_switch, etc.) to trigger immediately.
+    """
+    return handle_bip_generate(
+        project_dir=_project(), home=_home(),
+        platform=platform, force=force, event=event,
+    )
+
+
+@mcp.tool()
+def bip_approve(
+    draft_text: str,
+    source_keys: list[str] | None = None,
+    publish_at: str | None = None,
+) -> dict:
+    """Approve a BIP draft — save it and queue to Typefully.
+
+    Args:
+        draft_text: The approved draft text. For threads, separate tweets with blank lines.
+        source_keys: Source keys for dedup (e.g. ["git:abc123", "correction:001"]).
+        publish_at: Optional ISO 8601 UTC timestamp for scheduled publishing.
+    """
+    return handle_bip_approve(
+        project_dir=_project(),
+        draft_text=draft_text,
+        source_keys=source_keys,
+        publish_at=publish_at,
+    )
+
+
+@mcp.tool()
+def bip_status() -> dict:
+    """Get current build-in-public state — counters, cooldown, recent posts."""
+    return handle_bip_status(project_dir=_project())
 
 
 async def run():  # pragma: no cover — starts blocking stdio server

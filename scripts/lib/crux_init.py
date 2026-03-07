@@ -30,6 +30,11 @@ sessions/
 corrections/
 scripts/session/
 scripts/archive/
+bip/state.json
+bip/history.jsonl
+bip/drafts/
+bip/config.json
+bip/typefully.key
 
 # Crux: tracked data (explicitly allowed)
 !knowledge/
@@ -67,6 +72,8 @@ def init_project(project_dir: str | None = None) -> InitResult:
         paths.scripts_templates,
         paths.context,
         paths.models,
+        paths.bip,
+        paths.bip_drafts,
     ]
 
     for d in dirs:

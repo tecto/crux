@@ -464,8 +464,14 @@ def check_liveness(project_dir: str, home: str) -> list[dict]:
                     cmd = hook.get("command", "")
                     if not cmd:
                         continue
-                    # Extract the executable (first token)
-                    executable = cmd.split()[0] if cmd.split() else ""
+                    # Extract the executable, skipping env var assignments (KEY=val)
+                    tokens = cmd.split()
+                    executable = ""
+                    for token in tokens:
+                        if "=" in token and not token.startswith("/"):
+                            continue  # Skip env var assignments like PYTHONPATH=...
+                        executable = token
+                        break
                     if executable and not os.path.isfile(executable):
                         all_commands_valid = False
                         bad_commands.append(executable)

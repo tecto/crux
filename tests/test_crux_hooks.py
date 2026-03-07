@@ -999,6 +999,43 @@ class TestPostToolUsePeriodicProcessor:
         assert "processors_run" not in result
 
 
+class TestPostToolUseBIPCounter:
+    """Verify PostToolUse increments BIP interaction counter."""
+
+    def test_increments_bip_interactions(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+
+        # Create bip dir
+        bip_dir = os.path.join(env["project"], ".crux", "bip")
+        os.makedirs(bip_dir, exist_ok=True)
+
+        handle_post_tool_use(
+            event_data={"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        handle_post_tool_use(
+            event_data={"tool_name": "Grep", "tool_input": {"pattern": "foo"}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+
+        from scripts.lib.crux_bip import load_state
+        state = load_state(bip_dir)
+        assert state.interactions_since_last_post == 2
+
+    def test_no_crash_without_bip_dir(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+
+        # No bip dir — should not crash
+        result = handle_post_tool_use(
+            event_data={"tool_name": "Read", "tool_input": {}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+
+
 class TestHandleStopTddCheck:
     """Verify that handle_stop includes TDD compliance in its result."""
 

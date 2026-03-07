@@ -51,11 +51,11 @@ Crux generates tool-specific configuration from `.crux/` data:
 - **OpenCode**: Symlinks to `~/.config/opencode/` for modes, agents, and knowledge
 - **Cursor**: `.cursor/rules/` with plain markdown rules, `.cursor/mcp.json` for MCP registration
 - **Windsurf**: `.windsurf/rules/` with plain markdown rules, `.windsurf/mcp.json` for MCP registration
-- **MCP Server**: 34-tool FastMCP server accessible from any MCP-compatible client
+- **MCP Server**: 37-tool FastMCP server accessible from any MCP-compatible client
 
 ## The MCP Server
 
-Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 34 tools:
+Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 37 tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -81,6 +81,7 @@ Crux exposes its capabilities via the Model Context Protocol, making them availa
 | `get_processor_status` | Background processor run history |
 | `register_project` / `get_cross_project_digest` | Cross-project analytics aggregation |
 | `figma_get_tokens` / `figma_get_components` | Figma design token extraction |
+| `bip_generate` / `bip_approve` / `bip_status` | Build-in-public content pipeline |
 
 ## What Crux Is Not
 
@@ -98,46 +99,56 @@ Crux exposes its capabilities via the Model Context Protocol, making them availa
 
 ### Prerequisites
 
-- macOS with Apple Silicon (M1/M2/M3/M4) or Linux
-- Python 3.10+ (for MCP server and scripts)
-- Git installed
+- macOS (Apple Silicon) or Linux
+- Python 3.10+
+- Git
 
-### Install
-
-```bash
-git clone https://github.com/trinsiklabs/crux.git
-cd crux
-chmod +x setup.sh
-./setup.sh
-```
-
-The setup script detects your environment, configures symlinks, and sets up the MCP server.
-
-### Adopt Into an Existing Project
+### Claude Code
 
 ```bash
+git clone https://github.com/trinsiklabs/crux.git ~/.crux
+~/.crux/setup.sh        # Select "Claude Code" — installs deps + CLI (~10 seconds)
+source ~/.zshrc
+
 cd your-project
-python -m scripts.lib.crux_adopt
+crux adopt               # Sets up .crux/, MCP server (37 tools), and hooks
 ```
 
-This initializes `.crux/` in your project, captures git history, generates a PROJECT.md, and registers the MCP server with your active tool.
+Start Claude Code in your project. The Crux MCP tools and hooks (correction detection, interaction logging, session context) are automatically available.
 
-### First Session
+### OpenCode (Local LLMs)
 
-Crux works with whatever AI tool you're using. Context is automatically injected via hooks (Claude Code) or MCP tools (OpenCode, others).
+```bash
+git clone https://github.com/trinsiklabs/crux.git ~/.crux
+~/.crux/setup.sh        # Select "OpenCode" — full setup (Ollama, models, symlinks)
+source ~/.zshrc
 
-Switch modes via your tool's agent/mode selector. Available modes:
+cd your-project
+crux switch opencode     # Or just launch opencode — MCP config is global
+```
+
+### Switch Tools Anytime
+
+Already set up? Switch between tools without losing session state:
+
+```bash
+crux switch cursor       # Generate .cursor/rules/ + .cursor/mcp.json
+crux switch windsurf     # Generate .windsurf/rules/ + .windsurf/mcp.json
+crux switch claude-code  # Restore Claude Code hooks + MCP config
+```
+
+### Modes
+
+Switch modes via your tool's agent/mode selector:
 
 ```
 build-py          build-ex          plan              infra-architect
 review            debug             explain           analyst
 writer            psych             legal             strategist
 ai-infra          mac               docker            test
-security          marketing         design-ui         design-system
-design-review     design-responsive design-accessibility
+security          marketing         build-in-public   design-ui
+design-system     design-review     design-responsive design-accessibility
 ```
-
-See the [User Manual](docs/manual.md) for comprehensive usage documentation.
 
 ---
 
@@ -205,7 +216,7 @@ crux/
 └── README.md
 ```
 
-## The 23 Modes
+## The 24 Modes
 
 | Category | Mode | Focus |
 |----------|------|-------|
@@ -220,7 +231,8 @@ crux/
 | Communication | explain | Teaching, mentoring |
 | Communication | analyst | Data analysis |
 | Communication | writer | Professional writing |
-| Communication | marketing | Build-in-public content |
+| Communication | marketing | Marketing strategy, positioning |
+| Communication | build-in-public | Shipping update content |
 | Decision-Making | psych | ACT, attachment theory, shadow work |
 | Decision-Making | legal | Legal research, contracts |
 | Decision-Making | strategist | First principles, pre-mortems |

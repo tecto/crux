@@ -219,7 +219,7 @@ class TestSyncOpenCode:
         config_file = Path(env["home"]) / ".config" / "opencode" / "opencode.json"
         config = json.loads(config_file.read_text())
         mcp_env = config["mcp"]["crux"]["environment"]
-        assert "CRUX_PROJECT" in mcp_env
+        assert "CRUX_PROJECT" not in mcp_env  # resolved dynamically via cwd
         assert "CRUX_HOME" in mcp_env
 
     def test_mcp_config_preserves_existing_opencode_json(self, env):

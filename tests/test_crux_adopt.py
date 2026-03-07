@@ -256,7 +256,8 @@ class TestAdoptMCPSetup:
         data = json.loads(mcp_json.read_text())
         assert "crux" in data["mcpServers"]
 
-    def test_mcp_json_has_correct_command(self, project_with_git):
+    def test_mcp_json_has_absolute_python_path(self, project_with_git):
+        import sys
         adopt_project(
             project_dir=project_with_git["project"],
             home=project_with_git["home"],
@@ -264,9 +265,74 @@ class TestAdoptMCPSetup:
         mcp_json = Path(project_with_git["project"]) / ".claude" / "mcp.json"
         data = json.loads(mcp_json.read_text())
         server = data["mcpServers"]["crux"]
-        assert server["command"] == "python"
+        assert server["command"] == sys.executable
         assert "-m" in server["args"]
         assert "scripts.lib.crux_mcp_server" in server["args"]
+
+    def test_mcp_json_has_pythonpath(self, project_with_git):
+        adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        mcp_json = Path(project_with_git["project"]) / ".claude" / "mcp.json"
+        data = json.loads(mcp_json.read_text())
+        server = data["mcpServers"]["crux"]
+        assert "PYTHONPATH" in server["env"]
+
+
+class TestAdoptHooksSetup:
+    def test_creates_settings_local_json(self, project_with_git):
+        adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        settings = Path(project_with_git["project"]) / ".claude" / "settings.local.json"
+        assert settings.exists()
+
+    def test_settings_has_all_hooks(self, project_with_git):
+        adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        settings = Path(project_with_git["project"]) / ".claude" / "settings.local.json"
+        data = json.loads(settings.read_text())
+        assert "hooks" in data
+        for hook_name in ("SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"):
+            assert hook_name in data["hooks"], f"Missing hook: {hook_name}"
+
+    def test_hooks_use_crux_hook_runner(self, project_with_git):
+        adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        settings = Path(project_with_git["project"]) / ".claude" / "settings.local.json"
+        data = json.loads(settings.read_text())
+        for hook_name, hook_list in data["hooks"].items():
+            cmd = hook_list[0]["hooks"][0]["command"]
+            assert "crux_hook_runner" in cmd
+            assert hook_name in cmd
+
+    def test_preserves_existing_settings(self, project_with_git):
+        claude_dir = Path(project_with_git["project"]) / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        existing = {"permissions": {"allow": ["Bash(git:*)"]}}
+        (claude_dir / "settings.local.json").write_text(json.dumps(existing))
+
+        adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        settings = Path(project_with_git["project"]) / ".claude" / "settings.local.json"
+        data = json.loads(settings.read_text())
+        assert data["permissions"]["allow"] == ["Bash(git:*)"]
+        assert "hooks" in data
+
+    def test_items_setup_mentions_hooks(self, project_with_git):
+        result = adopt_project(
+            project_dir=project_with_git["project"],
+            home=project_with_git["home"],
+        )
+        assert any("hooks" in item.lower() for item in result.items_setup)
 
 
 # ---------------------------------------------------------------------------

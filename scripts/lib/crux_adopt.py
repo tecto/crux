@@ -26,6 +26,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.lib.crux_hooks import build_hook_settings
 from scripts.lib.crux_init import init_project, init_user
 from scripts.lib.crux_paths import get_project_paths, get_user_paths
 from scripts.lib.crux_session import SessionState, save_session, write_handoff
@@ -214,18 +215,23 @@ def adopt_project(
         if written:
             items_setup.append(f"Created {written} knowledge entries")
 
-    # 8. Set up MCP server config for Claude Code
+    # 8. Set up Claude Code integration (MCP server + hooks)
     claude_dir = os.path.join(project_dir, ".claude")
     os.makedirs(claude_dir, exist_ok=True)
+
+    # 8a. MCP server config
+    import sys
+    crux_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     mcp_json_path = os.path.join(claude_dir, "mcp.json")
     mcp_config = {
         "mcpServers": {
             "crux": {
-                "command": "python",
+                "command": sys.executable,
                 "args": ["-m", "scripts.lib.crux_mcp_server"],
                 "env": {
                     "CRUX_PROJECT": project_dir,
                     "CRUX_HOME": home,
+                    "PYTHONPATH": crux_repo,
                 },
             }
         }
@@ -233,6 +239,23 @@ def adopt_project(
     with open(mcp_json_path, "w") as f:
         json.dump(mcp_config, f, indent=2)
     items_setup.append("Created .claude/mcp.json")
+
+    # 8b. Hooks config in settings.local.json
+    settings_path = os.path.join(claude_dir, "settings.local.json")
+    existing_settings: dict = {}
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path) as f:
+                existing_settings = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing_settings = {}
+
+    hook_settings = build_hook_settings(project_dir=project_dir, home=home)
+    existing_settings["hooks"] = hook_settings["hooks"]
+
+    with open(settings_path, "w") as f:
+        json.dump(existing_settings, f, indent=2)
+    items_setup.append("Created .claude/settings.local.json (hooks)")
 
     return AdoptResult(
         success=True,

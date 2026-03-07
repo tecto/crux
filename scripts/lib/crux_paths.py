@@ -137,6 +137,26 @@ class ProjectPaths:
         return os.path.join(self.root, "context", "PROJECT.md")
 
     @property
+    def bip(self) -> str:
+        return os.path.join(self.root, "bip")
+
+    @property
+    def bip_drafts(self) -> str:
+        return os.path.join(self.root, "bip", "drafts")
+
+    @property
+    def bip_config(self) -> str:
+        return os.path.join(self.root, "bip", "config.json")
+
+    @property
+    def bip_state(self) -> str:
+        return os.path.join(self.root, "bip", "state.json")
+
+    @property
+    def bip_history(self) -> str:
+        return os.path.join(self.root, "bip", "history.jsonl")
+
+    @property
     def config_file(self) -> str:
         return os.path.join(self.root, "project.json")
 

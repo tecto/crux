@@ -58,6 +58,8 @@ OPENCODE_AGENT_META: dict[str, dict] = {
     "explain":            {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Teaching and mentoring", "permission": _PERM_READONLY},
     "mac":                {"model": _MODEL_CHAT, "temperature": 0.7, "description": "macOS system operations", "permission": _PERM_LIMITED},
     "ai-infra":           {"model": _MODEL_CHAT, "temperature": 0.7, "description": "AI/LLM infrastructure management", "permission": _PERM_FULL},
+    "marketing":          {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Marketing strategy and copywriting", "permission": _PERM_READONLY},
+    "build-in-public":    {"model": _MODEL_CHAT, "temperature": 0.7, "description": "Shipping update content for build-in-public", "permission": _PERM_FULL},
 }
 
 # Claude Code agent frontmatter metadata (tool list format differs from OpenCode)
@@ -77,6 +79,8 @@ _MODE_META = {
     "ai-infra": {"description": "AI/LLM infrastructure management", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "mac": {"description": "macOS system operations", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "docker": {"description": "Container and Linux operations", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
+    "marketing": {"description": "Marketing strategy and copywriting", "tools": "Read, Grep, Glob", "permissionMode": "plan"},
+    "build-in-public": {"description": "Shipping update content for build-in-public", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "test": {"description": "Test-first development specialist", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
     "security": {"description": "Adversarial vulnerability analysis", "tools": "Read, Grep, Glob", "permissionMode": "plan"},
     "design-ui": {"description": "UI component implementation", "tools": "Read, Write, Edit, Bash, Grep, Glob"},
@@ -245,7 +249,6 @@ def _write_opencode_mcp_config(config_dir: str, project_dir: str, home: str) -> 
         "type": "local",
         "command": [python_path, "-m", "scripts.lib.crux_mcp_server"],
         "environment": {
-            "CRUX_PROJECT": project_dir,
             "CRUX_HOME": home,
             "PYTHONPATH": crux_repo,
         },

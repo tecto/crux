@@ -319,6 +319,9 @@ def handle_post_tool_use(
             update_session(crux_dir, add_file=file_path)
             result["file_tracked"] = file_path
 
+    # Increment BIP interaction counter
+    _increment_bip_counter(project_dir, "interactions_since_last_post", 1)
+
     # Periodic background processor check
     count = _count_interactions(project_dir)
     if count > 0 and count % _PROCESSOR_CHECK_INTERVAL == 0:
@@ -327,6 +330,17 @@ def handle_post_tool_use(
             result["processors_run"] = bg_result.get("processors_run", [])
 
     return result
+
+
+def _increment_bip_counter(project_dir: str, field_name: str, amount: int = 1) -> None:
+    """Increment a BIP state counter. Never raises."""
+    try:
+        bip_dir = os.path.join(project_dir, ".crux", "bip")
+        if os.path.isdir(bip_dir):
+            from scripts.lib.crux_bip import increment_counter
+            increment_counter(bip_dir, field_name, amount)
+    except Exception:
+        pass
 
 
 def _try_background_processors(project_dir: str, home: str) -> dict | None:
@@ -447,10 +461,11 @@ def run_hook(
 
 def build_hook_settings(project_dir: str, home: str) -> dict:
     """Build the hooks configuration for .claude/settings.local.json."""
-    # Use absolute python path for reliability
+    # Use absolute python path and PYTHONPATH for reliability across projects
     import sys
     python = sys.executable
-    runner = f"{python} -m scripts.lib.crux_hook_runner"
+    crux_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    runner = f"PYTHONPATH={crux_repo} {python} -m scripts.lib.crux_hook_runner"
 
     return {
         "hooks": {

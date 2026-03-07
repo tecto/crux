@@ -383,3 +383,33 @@ teardown() {
     [[ "$output" == *"switch"* ]]
     [[ "$output" == *"crux switch opencode"* ]]
 }
+
+# =========================================================================
+# BIP (build-in-public)
+# =========================================================================
+
+@test "crux help shows bip command" {
+    run bash "$CRUX_CLI" help
+    [[ "$output" == *"bip"* ]]
+    [[ "$output" == *"Build-in-public"* ]]
+}
+
+@test "crux bip --status runs without crashing" {
+    mkdir -p "$TEST_DIR/.crux/bip"
+    export CRUX_PROJECT="$TEST_DIR"
+    export CRUX_HOME="$TEST_DIR"
+    run bash "$CRUX_CLI" bip --status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Build-in-Public Status"* ]]
+    [[ "$output" == *"Commits since last post"* ]]
+}
+
+@test "crux bip checks triggers" {
+    mkdir -p "$TEST_DIR/.crux/bip"
+    mkdir -p "$TEST_DIR/.crux/sessions"
+    export CRUX_PROJECT="$TEST_DIR"
+    export CRUX_HOME="$TEST_DIR"
+    run bash "$CRUX_CLI" bip
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No post triggered"* ]] || [[ "$output" == *"Draft material ready"* ]]
+}

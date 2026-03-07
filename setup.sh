@@ -134,6 +134,81 @@ safe_symlink() {
 }
 
 ###############################################################################
+# TOOL SELECTION — determines which path to run
+###############################################################################
+
+SELECTED_TOOL=""
+
+select_tool() {
+    if [ "$UPDATE_MODE" = true ]; then
+        # In update mode, detect from state or default to opencode
+        SELECTED_TOOL=$(state_read "selected_tool")
+        if [ -z "$SELECTED_TOOL" ]; then
+            SELECTED_TOOL="opencode"
+        fi
+        info "Updating for: $SELECTED_TOOL"
+        return 0
+    fi
+
+    header "Which AI tool will you use with Crux?"
+
+    local choice
+    choice=$(ask_choice "Select your primary tool:" \
+        "Claude Code (Anthropic CLI — cloud models)" \
+        "OpenCode (terminal UI — local Ollama models)" \
+        "Both (install everything)")
+
+    case "$choice" in
+        0) SELECTED_TOOL="claude-code" ;;
+        1) SELECTED_TOOL="opencode" ;;
+        2) SELECTED_TOOL="both" ;;
+    esac
+
+    state_save "selected_tool" "$SELECTED_TOOL"
+    success "Selected: $SELECTED_TOOL"
+}
+
+needs_opencode() {
+    [ "$SELECTED_TOOL" = "opencode" ] || [ "$SELECTED_TOOL" = "both" ]
+}
+
+needs_claude_code() {
+    [ "$SELECTED_TOOL" = "claude-code" ] || [ "$SELECTED_TOOL" = "both" ]
+}
+
+###############################################################################
+# PYTHON DEPENDENCIES (mcp package for MCP server)
+###############################################################################
+
+install_python_deps() {
+    header "Installing Python Dependencies"
+
+    if ! command -v python3 &>/dev/null; then
+        error "Python 3 not found. Install via: brew install python3"
+        return 1
+    fi
+
+    local py_version
+    py_version=$(python3 --version 2>&1)
+    success "Python: $py_version"
+
+    # Check if mcp is already installed
+    if python3 -c "import mcp" 2>/dev/null; then
+        success "MCP package already installed"
+    else
+        info "Installing MCP package (required for Crux MCP server)..."
+        if python3 -m pip install -r "$CRUX_DIR/requirements.txt" 2>/dev/null; then
+            success "MCP package installed"
+        elif pip3 install -r "$CRUX_DIR/requirements.txt" 2>/dev/null; then
+            success "MCP package installed"
+        else
+            error "Failed to install MCP package. Run manually: pip install mcp"
+            return 1
+        fi
+    fi
+}
+
+###############################################################################
 # STEP 1: HARDWARE DETECTION
 ###############################################################################
 
@@ -1105,8 +1180,7 @@ install_python_scripts() {
         warn "Install via: brew install python3"
     fi
 
-    # All scripts use stdlib only — no pip install needed
-    info "All Python scripts use stdlib only (no pip dependencies required)"
+    info "Python scripts installed (MCP dependency handled by install_python_deps)"
 }
 
 ###############################################################################
@@ -1425,8 +1499,94 @@ verify_installation() {
 }
 
 ###############################################################################
+# CLAUDE CODE VERIFICATION
+###############################################################################
+
+verify_claude_code() {
+    header "Verification"
+
+    local checks_passed=0
+    local checks_total=0
+
+    # Python 3
+    checks_total=$((checks_total + 1))
+    if command -v python3 &>/dev/null; then
+        success "Python 3: $(python3 --version 2>&1)"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "Python 3 not found"
+    fi
+
+    # MCP package
+    checks_total=$((checks_total + 1))
+    if python3 -c "import mcp" 2>/dev/null; then
+        success "MCP package installed"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "MCP package not installed (run: pip install mcp)"
+    fi
+
+    # Crux CLI
+    checks_total=$((checks_total + 1))
+    if command -v crux &>/dev/null; then
+        success "Crux CLI: $(crux version 2>/dev/null | head -1)"
+        checks_passed=$((checks_passed + 1))
+    else
+        warn "Crux CLI not in PATH yet (reload your shell)"
+        checks_passed=$((checks_passed + 1))  # Expected before shell reload
+    fi
+
+    # Modes directory
+    checks_total=$((checks_total + 1))
+    local mode_count
+    mode_count=$(ls -1 "$CRUX_DIR/modes"/*.md 2>/dev/null | grep -v '_template' | wc -l | tr -d ' ')
+    if [ "$mode_count" -ge 15 ]; then
+        success "$mode_count modes available"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "Only $mode_count modes found"
+    fi
+
+    echo ""
+    echo -e "${BOLD}Verification: ${GREEN}$checks_passed${NC}/$checks_total passed${NC}"
+}
+
+###############################################################################
 # FINAL SUMMARY
 ###############################################################################
+
+summary_claude_code() {
+    header "Setup Complete!"
+
+    echo -e "${CYAN}→${NC} Crux is ready for Claude Code!"
+    echo ""
+
+    echo -e "${BOLD}Quick Start:${NC}"
+    echo "  1. Reload your shell:"
+    echo "       source ~/.zshrc"
+    echo ""
+    echo "  2. Adopt Crux into any project:"
+    echo "       cd your-project"
+    echo "       crux adopt"
+    echo ""
+    echo "  3. Start Claude Code in that project — MCP server and hooks are"
+    echo "     automatically configured. The Crux MCP tools are available"
+    echo "     immediately."
+    echo ""
+
+    echo -e "${BOLD}What crux adopt does:${NC}"
+    echo "  Creates .crux/          Session state, knowledge, analytics"
+    echo "  Creates .claude/mcp.json     Registers Crux MCP server (37 tools)"
+    echo "  Creates .claude/settings.local.json   Hooks for corrections, logging"
+    echo ""
+
+    echo -e "${BOLD}Staying Current:${NC}"
+    echo "  crux update         Pull latest from GitHub"
+    echo "  crux status         Runtime health and session info"
+    echo "  crux doctor         Infrastructure health check"
+    echo "  crux switch cursor  Switch to Cursor/Windsurf anytime"
+    echo ""
+}
 
 final_summary() {
     header "Setup Complete!"
@@ -1525,20 +1685,37 @@ main() {
         fi
     fi
 
+    # Select tool (or read from state in update mode)
+    select_tool
+
     if [ "$UPDATE_MODE" = true ]; then
-        # Update mode: only refresh symlinks and scripts (non-interactive)
-        configure_opencode
-        install_modes
-        install_agents_md
-        install_commands
-        install_tools
-        install_skills
-        install_plugins
-        install_python_scripts
+        # Update mode: refresh based on selected tool
+        install_python_deps
         install_crux_cli
-        verify_installation
-    else
-        # Full interactive setup
+
+        if needs_opencode; then
+            configure_opencode
+            install_modes
+            install_agents_md
+            install_commands
+            install_tools
+            install_skills
+            install_plugins
+            install_python_scripts
+            verify_installation
+        fi
+
+        if needs_claude_code; then
+            verify_claude_code
+        fi
+    elif [ "$SELECTED_TOOL" = "claude-code" ]; then
+        # Claude Code: minimal setup — just deps and CLI
+        install_python_deps
+        install_crux_cli
+        verify_claude_code
+        summary_claude_code
+    elif [ "$SELECTED_TOOL" = "opencode" ]; then
+        # OpenCode: full local LLM setup
         detect_hardware
         install_ollama
         select_and_pull_models
@@ -1555,11 +1732,41 @@ main() {
         create_knowledge_base
         create_model_registry
         create_analytics
+        install_python_deps
         install_python_scripts
         install_crux_cli
         optional_integrations
         verify_installation
         final_summary
+    else
+        # Both: everything
+        detect_hardware
+        install_ollama
+        select_and_pull_models
+        create_modelfiles
+        tune_environment
+        install_opencode
+        configure_opencode
+        install_modes
+        install_agents_md
+        install_commands
+        install_tools
+        install_skills
+        install_plugins
+        create_knowledge_base
+        create_model_registry
+        create_analytics
+        install_python_deps
+        install_python_scripts
+        install_crux_cli
+        optional_integrations
+        verify_installation
+        verify_claude_code
+        final_summary
+        echo ""
+        echo -e "${BOLD}Claude Code:${NC}"
+        echo "  cd your-project && crux adopt"
+        echo ""
     fi
 
     state_mark "setup_complete"

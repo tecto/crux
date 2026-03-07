@@ -201,7 +201,7 @@ class TestGetStatus:
 
         result = get_status(project_dir=env["project"], home=env["home"])
         assert result["mcp"]["registered"] is True
-        assert result["mcp"]["tool_count"] == 34
+        assert result["mcp"]["tool_count"] == 37
 
     def test_mcp_not_registered_when_no_config(self, env):
         from scripts.lib.crux_status import get_status
@@ -533,7 +533,7 @@ class TestCheckLiveness:
         checks = check_liveness(project_dir=env["project"], home=env["home"])
         mcp_check = next(c for c in checks if "mcp loadable" in c["name"].lower())
         assert mcp_check["passed"] is True
-        assert "34" in mcp_check["message"]  # 34 tools
+        assert "37" in mcp_check["message"]  # 37 tools
 
     def test_mcp_loadable_reports_tool_count(self, env):
         from scripts.lib.crux_status import check_liveness
@@ -595,6 +595,20 @@ class TestCheckLiveness:
         cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
         assert cmd_check["passed"] is False
         assert "nonexistent" in cmd_check["message"].lower() or "not found" in cmd_check["message"].lower()
+
+    def test_hook_command_valid_with_env_var_prefix(self, env):
+        """PYTHONPATH=... prefix should be skipped when finding the executable."""
+        from scripts.lib.crux_status import check_liveness
+        import sys
+        claude_dir = os.path.join(env["project"], ".claude")
+        os.makedirs(claude_dir, exist_ok=True)
+        settings = {"hooks": {"PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": f"PYTHONPATH=/some/path {sys.executable} -m scripts.lib.crux_hook_runner PostToolUse"}]}]}}
+        with open(os.path.join(claude_dir, "settings.local.json"), "w") as f:
+            json.dump(settings, f)
+
+        checks = check_liveness(project_dir=env["project"], home=env["home"])
+        cmd_check = next(c for c in checks if "hook command" in c["name"].lower())
+        assert cmd_check["passed"] is True
 
     def test_hook_command_skipped_when_no_hooks(self, env):
         from scripts.lib.crux_status import check_liveness
