@@ -202,34 +202,168 @@ install_python_deps() {
     # Create venv if it doesn't exist
     if [ ! -d "$venv_dir" ]; then
         info "Creating Python virtual environment..."
-        if ! python3 -m venv "$venv_dir" 2>/dev/null; then
-            # On Ubuntu/Debian, python3-venv may not be installed
-            error "Failed to create venv. On Ubuntu/Debian, run:"
-            error "  sudo apt install python3-venv"
-            error "Then re-run setup.sh"
-            return 1
+
+        # Try standard venv creation first
+        if python3 -m venv "$venv_dir" 2>/dev/null; then
+            success "Created venv at $venv_dir"
+        else
+            # Check for PEP 668 (externally-managed environment)
+            if python3 -c "import sys; sys.exit(0 if hasattr(sys, 'base_prefix') else 1)" 2>/dev/null; then
+                # Try with --system-site-packages as fallback
+                info "Detected externally-managed Python (PEP 668), trying alternative..."
+                if python3 -m venv --system-site-packages "$venv_dir" 2>/dev/null; then
+                    success "Created venv with system site-packages at $venv_dir"
+                else
+                    # Final fallback: check if python3-venv is missing
+                    if [[ "$OSTYPE" == "linux"* ]]; then
+                        error "Failed to create venv. On Ubuntu/Debian, run:"
+                        error "  sudo apt install python3-venv python3-pip"
+                        error "Then re-run setup.sh"
+                    else
+                        error "Failed to create venv. Check Python installation."
+                    fi
+                    return 1
+                fi
+            else
+                error "Failed to create venv. On Ubuntu/Debian, run:"
+                error "  sudo apt install python3-venv"
+                error "Then re-run setup.sh"
+                return 1
+            fi
         fi
-        success "Created venv at $venv_dir"
     else
         success "Venv already exists at $venv_dir"
     fi
 
-    # Install deps into venv
+    # Ensure pip is up to date in venv
     local venv_python="$venv_dir/bin/python"
-    if "$venv_python" -c "import mcp" 2>/dev/null; then
-        success "MCP package already installed"
-    else
-        info "Installing MCP package into venv..."
-        if "$venv_python" -m pip install -r "$CRUX_DIR/requirements.txt" 2>&1 | tail -1; then
-            success "MCP package installed"
+    info "Ensuring pip is up to date..."
+    "$venv_python" -m pip install --upgrade pip --quiet 2>/dev/null || true
+
+    # Check if all required packages are installed
+    local needs_install=false
+    if ! "$venv_python" -c "import mcp" 2>/dev/null; then
+        needs_install=true
+    fi
+    if ! "$venv_python" -c "import yaml" 2>/dev/null; then
+        needs_install=true
+    fi
+    if ! "$venv_python" -c "import aiohttp" 2>/dev/null; then
+        needs_install=true
+    fi
+
+    if [ "$needs_install" = true ]; then
+        info "Installing Python dependencies into venv..."
+        if "$venv_python" -m pip install -r "$CRUX_DIR/requirements.txt" --quiet 2>&1; then
+            success "Python dependencies installed"
         else
-            error "Failed to install MCP package"
+            # Try without quiet flag to see errors
+            error "Failed to install dependencies. Retrying with verbose output..."
+            "$venv_python" -m pip install -r "$CRUX_DIR/requirements.txt" 2>&1 | tail -10
             return 1
         fi
+    else
+        success "Python dependencies already installed"
     fi
 
     # Save venv python path for other components to use
     state_save "venv_python" "$venv_python"
+}
+
+###############################################################################
+# CLAUDE CODE MCP CONFIGURATION (PLAN-168)
+###############################################################################
+
+configure_claude_code_mcp() {
+    header "Configuring Claude Code MCP Server"
+
+    local claude_config_dir="$HOME/.claude"
+    local mcp_config="$claude_config_dir/mcp.json"
+    local venv_python="$CRUX_DIR/.venv/bin/python"
+
+    # Create .claude directory if needed
+    mkdir -p "$claude_config_dir"
+
+    # Check if MCP config already exists
+    if [ -f "$mcp_config" ]; then
+        # Check if crux server is already configured
+        if grep -q '"crux"' "$mcp_config" 2>/dev/null; then
+            success "Crux MCP server already configured in $mcp_config"
+            return 0
+        else
+            # Backup existing config
+            local backup="${mcp_config}.backup.$(date +%s)"
+            cp "$mcp_config" "$backup"
+            warn "Backed up existing MCP config to $backup"
+        fi
+    fi
+
+    info "Creating MCP server configuration..."
+
+    # Generate MCP config with absolute paths
+    cat > "$mcp_config" << EOF
+{
+  "mcpServers": {
+    "crux": {
+      "command": "$venv_python",
+      "args": [
+        "-m",
+        "scripts.lib.crux_mcp_server"
+      ],
+      "env": {
+        "CRUX_PROJECT": ".",
+        "CRUX_HOME": "$HOME",
+        "PYTHONPATH": "$CRUX_DIR"
+      }
+    }
+  }
+}
+EOF
+
+    success "Created MCP config at $mcp_config"
+}
+
+###############################################################################
+# MCP SERVER VERIFICATION (PLAN-168)
+###############################################################################
+
+verify_mcp_server() {
+    header "Verifying MCP Server"
+
+    local venv_python="$CRUX_DIR/.venv/bin/python"
+
+    # Check if venv python exists
+    if [ ! -x "$venv_python" ]; then
+        error "Venv Python not found at $venv_python"
+        return 1
+    fi
+
+    # Try to import the MCP server module
+    info "Checking MCP server module..."
+    if PYTHONPATH="$CRUX_DIR" "$venv_python" -c "from scripts.lib.crux_mcp_server import mcp; print('MCP server module OK')" 2>/dev/null; then
+        success "MCP server module loads correctly"
+    else
+        error "MCP server module failed to load"
+        warn "Trying to diagnose..."
+        PYTHONPATH="$CRUX_DIR" "$venv_python" -c "from scripts.lib.crux_mcp_server import mcp" 2>&1 | tail -5
+        return 1
+    fi
+
+    # Count available tools
+    info "Counting MCP tools..."
+    local tool_count
+    tool_count=$(PYTHONPATH="$CRUX_DIR" "$venv_python" -c "
+from scripts.lib.crux_mcp_server import mcp
+print(len(mcp._tool_manager._tools))
+" 2>/dev/null || echo "0")
+
+    if [ "$tool_count" -gt 0 ]; then
+        success "MCP server ready with $tool_count tools"
+    else
+        warn "MCP server loaded but no tools detected"
+    fi
+
+    return 0
 }
 
 ###############################################################################
@@ -1538,6 +1672,7 @@ verify_claude_code() {
 
     local checks_passed=0
     local checks_total=0
+    local venv_python="$CRUX_DIR/.venv/bin/python"
 
     # Python 3
     checks_total=$((checks_total + 1))
@@ -1548,13 +1683,40 @@ verify_claude_code() {
         error "Python 3 not found"
     fi
 
-    # MCP package
+    # Venv exists
     checks_total=$((checks_total + 1))
-    if python3 -c "import mcp" 2>/dev/null; then
-        success "MCP package installed"
+    if [ -x "$venv_python" ]; then
+        success "Venv Python: $venv_python"
         checks_passed=$((checks_passed + 1))
     else
-        error "MCP package not installed (run: pip install mcp)"
+        error "Venv Python not found at $venv_python"
+    fi
+
+    # MCP package in venv
+    checks_total=$((checks_total + 1))
+    if "$venv_python" -c "import mcp" 2>/dev/null; then
+        success "MCP package installed in venv"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "MCP package not installed in venv"
+    fi
+
+    # PyYAML in venv
+    checks_total=$((checks_total + 1))
+    if "$venv_python" -c "import yaml" 2>/dev/null; then
+        success "PyYAML installed in venv"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "PyYAML not installed in venv"
+    fi
+
+    # MCP config exists
+    checks_total=$((checks_total + 1))
+    if [ -f "$HOME/.claude/mcp.json" ] && grep -q '"crux"' "$HOME/.claude/mcp.json" 2>/dev/null; then
+        success "MCP config: ~/.claude/mcp.json"
+        checks_passed=$((checks_passed + 1))
+    else
+        error "MCP config not found or missing crux server"
     fi
 
     # Crux CLI
@@ -1597,22 +1759,27 @@ summary_claude_code() {
         shell_rc="~/.zshrc"
     fi
 
+    echo -e "${BOLD}What was configured:${NC}"
+    echo "  ✓ Python venv with all dependencies"
+    echo "  ✓ MCP server config at ~/.claude/mcp.json"
+    echo "  ✓ Crux CLI installed"
+    echo ""
+
     echo -e "${BOLD}Quick Start:${NC}"
     echo "  1. Reload your shell:"
     echo "       source $shell_rc"
     echo ""
-    echo "  2. Adopt Crux into any project:"
+    echo "  2. Start Claude Code — MCP server is already configured globally."
+    echo "     The Crux MCP tools are available immediately."
+    echo ""
+    echo "  3. (Optional) Adopt Crux into a specific project:"
     echo "       cd your-project"
     echo "       crux adopt"
     echo ""
-    echo "  3. Start Claude Code in that project — MCP server and hooks are"
-    echo "     automatically configured. The Crux MCP tools are available"
-    echo "     immediately."
-    echo ""
 
-    echo -e "${BOLD}What crux adopt does:${NC}"
+    echo -e "${BOLD}What crux adopt does (optional):${NC}"
     echo "  Creates .crux/          Session state, knowledge, analytics"
-    echo "  Creates .claude/mcp.json     Registers Crux MCP server (37 tools)"
+    echo "  Creates .claude/mcp.json     Project-specific MCP config"
     echo "  Creates .claude/settings.local.json   Hooks for corrections, logging"
     echo ""
 
@@ -1620,7 +1787,7 @@ summary_claude_code() {
     echo "  crux update         Pull latest from GitHub"
     echo "  crux status         Runtime health and session info"
     echo "  crux doctor         Infrastructure health check"
-    echo "  crux switch cursor  Switch to Cursor/Windsurf anytime"
+    echo "  ./setup.sh --update Refresh installation after updates"
     echo ""
 }
 
@@ -1730,12 +1897,16 @@ main() {
         fi
 
         if needs_claude_code; then
+            configure_claude_code_mcp
+            verify_mcp_server
             verify_claude_code
         fi
     elif [ "$SELECTED_TOOL" = "claude-code" ]; then
-        # Claude Code: minimal setup — just deps and CLI
+        # Claude Code: deps, MCP config, CLI, verification (PLAN-168)
         install_python_deps
+        configure_claude_code_mcp
         install_crux_cli
+        verify_mcp_server
         verify_claude_code
         summary_claude_code
     elif [ "$SELECTED_TOOL" = "opencode" ]; then
