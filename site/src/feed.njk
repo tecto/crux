@@ -1,0 +1,25 @@
+---
+permalink: /feed.xml
+eleventyExcludeFromCollections: true
+---
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>crux</title>
+  <subtitle>rails for AI coding tools — build-in-public log</subtitle>
+  <link href="https://runcrux.io/"/>
+  <link href="https://runcrux.io/feed.xml" rel="self"/>
+  <updated>{{ collections.post[0].date }}</updated>
+  <id>https://runcrux.io/</id>
+  <author>
+    <name>Bryan</name>
+  </author>
+  {% for post in collections.post %}
+  <entry>
+    <title>{{ post.data.title }}</title>
+    <link href="https://runcrux.io{{ post.url }}"/>
+    <updated>{{ post.date | htmlDateString }}T00:00:00Z</updated>
+    <id>https://runcrux.io{{ post.url }}</id>
+    <summary>{{ post.data.summary or "" }}</summary>
+  </entry>
+  {% endfor %}
+</feed>

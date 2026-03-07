@@ -1,5 +1,9 @@
 # Crux Agent Framework
 
+## Session Startup
+
+**At the start of every new session**, call the `restore_context` MCP tool before doing anything else. This restores your active mode, what was being worked on, key decisions, pending tasks, and files touched from the previous session. Present a brief summary and confirm readiness to continue.
+
 ## Core Principles
 
 ### Scripts-First Design
@@ -130,16 +134,13 @@ Every script modification should be git-tracked:
 - Push to origin: `git push origin scripts/new-feature`
 - Never force-push to main
 
-## Session Logging
+## Conversation Logging
 
-Every session is automatically logged in `.opencode/sessions/` with:
-- Start timestamp
-- Mode used (if specific)
-- Commands executed
-- Results and outputs
-- End timestamp
+**After receiving every user message**, call the `log_interaction` MCP tool with `role: "user"` and the full message content. This enables Crux's continuous learning system to analyze interaction patterns, detect corrections, and improve over time.
 
-Logs are JSONL format for easy parsing and analysis.
+For significant assistant responses (decisions, implementations, explanations), also call `log_interaction` with `role: "assistant"` and the response content.
+
+This is a hard requirement. Without conversation logging, Crux cannot learn from interactions.
 
 ## Resume Mechanism
 

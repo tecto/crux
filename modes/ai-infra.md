@@ -1,3 +1,12 @@
+---
+temperature: 0.7
+mode: primary
+description: AI/LLM infrastructure management
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: ai-infra
 
 Local LLM infrastructure and optimization.

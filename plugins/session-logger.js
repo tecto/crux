@@ -1,34 +1,76 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 class SessionLogger {
   constructor() {
     this.sessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.sessionDir = null;
     this.logFile = null;
+    this.checkpointFile = null;
     this.buffer = [];
     this.flushInterval = null;
+    this.interactionCount = 0;
+    this.checkpointInterval = 5;
+    this.currentMode = null;
+    this.recentKnowledgeLookups = [];
+    this.activeScripts = [];
+    this.recovered = null;
   }
 
   async initialize() {
-    const sessionsBase = path.expand('~/.config/opencode/sessions');
+    const sessionsBase = path.join(process.env.HOME, '.crux/analytics/sessions');
     const today = new Date().toISOString().split('T')[0];
     this.sessionDir = path.join(sessionsBase, today);
+    this.checkpointFile = path.join(sessionsBase, 'checkpoint.json');
 
     await fs.mkdir(this.sessionDir, { recursive: true });
     this.logFile = path.join(this.sessionDir, `${this.sessionId}.jsonl`);
 
-    // Start periodic flush
+    await this._tryRecover();
+
     this.flushInterval = setInterval(() => this.flush(), 5000);
+    if (this.flushInterval.unref) this.flushInterval.unref();
 
     this.log({
       type: 'session.start',
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
+      recovered: this.recovered,
     });
+  }
+
+  async _tryRecover() {
+    try {
+      const data = await fs.readFile(this.checkpointFile, 'utf8');
+      const checkpoint = JSON.parse(data);
+      this.recovered = {
+        previousSessionId: checkpoint.sessionId,
+        timestamp: checkpoint.timestamp,
+        mode: checkpoint.mode,
+        interactionCount: checkpoint.interactionCount,
+      };
+      this.currentMode = checkpoint.mode;
+      this.recentKnowledgeLookups = checkpoint.recentKnowledgeLookups || [];
+      this.activeScripts = checkpoint.activeScripts || [];
+    } catch {
+      this.recovered = null;
+    }
+  }
+
+  async _saveCheckpoint() {
+    const checkpoint = {
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      mode: this.currentMode,
+      interactionCount: this.interactionCount,
+      recentKnowledgeLookups: this.recentKnowledgeLookups.slice(-5),
+      activeScripts: this.activeScripts.slice(-10),
+    };
+    try {
+      await fs.writeFile(this.checkpointFile, JSON.stringify(checkpoint, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Checkpoint save error:', err);
+    }
   }
 
   log(entry) {
@@ -36,6 +78,36 @@ class SessionLogger {
       ...entry,
       timestamp: entry.timestamp || new Date().toISOString(),
     });
+  }
+
+  trackInteraction(mode) {
+    this.interactionCount++;
+    if (mode) this.currentMode = mode;
+    if (this.interactionCount % this.checkpointInterval === 0) {
+      this._saveCheckpoint();
+      this.log({
+        type: 'session.checkpoint',
+        interactionCount: this.interactionCount,
+        mode: this.currentMode,
+      });
+    }
+  }
+
+  trackKnowledgeLookup(query, mode) {
+    this.recentKnowledgeLookups.push({ query, mode, timestamp: new Date().toISOString() });
+    if (this.recentKnowledgeLookups.length > 10) {
+      this.recentKnowledgeLookups = this.recentKnowledgeLookups.slice(-10);
+    }
+  }
+
+  trackScript(scriptName) {
+    if (!this.activeScripts.includes(scriptName)) {
+      this.activeScripts.push(scriptName);
+    }
+  }
+
+  getRecoveryInfo() {
+    return this.recovered;
   }
 
   async flush() {
@@ -61,75 +133,139 @@ class SessionLogger {
       type: 'session.end',
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
+      interactionCount: this.interactionCount,
     });
 
     await this.flush();
-  }
 
-  async getResume() {
-    // Read last session for recovery context
     try {
-      const files = await fs.readdir(this.sessionDir);
-      if (files.length === 0) return null;
-
-      const latestFile = files.sort().pop();
-      const content = await fs.readFile(
-        path.join(this.sessionDir, latestFile),
-        'utf8'
-      );
-
-      const lines = content.trim().split('\n');
-      const lastEntry = JSON.parse(lines[lines.length - 1]);
-
-      return {
-        lastMode: lastEntry.mode,
-        lastTask: lastEntry.lastTask,
-        context: lastEntry.context,
-      };
-    } catch (err) {
-      return null;
+      await fs.unlink(this.checkpointFile);
+    } catch {
+      // Checkpoint may not exist
     }
   }
 }
 
-const logger = new SessionLogger();
+// Factory function creates a fresh logger per plugin load
+function createPlugin() {
+  const logger = new SessionLogger();
 
-export default {
-  hooks: {
-    'session.start': async () => {
-      await logger.initialize();
-    },
+  const plugin = async (ctx) => {
+    return {
+      event: async ({ event }) => {
+        if (event.type === 'session.created') {
+          await logger.initialize();
+        } else if (event.type === 'session.deleted') {
+          await logger.shutdown();
+        }
+      },
 
-    'chat.message': (message) => {
-      logger.log({
-        type: 'chat.message',
-        role: message.role,
-        mode: message.mode,
-        content: message.content.substring(0, 200), // Truncate for size
-        tokens: message.tokens || 0,
-      });
-    },
+      'tool.execute.before': async (input, output) => {
+        logger.log({
+          type: 'tool.execute',
+          tool: input.tool,
+          params: JSON.stringify(output.args || {}).substring(0, 100),
+        });
+        if (input.tool === 'lookup_knowledge') {
+          logger.trackKnowledgeLookup(
+            output.args?.query || '',
+            output.args?.mode || ''
+          );
+        }
+        if (input.tool === 'run_script') {
+          logger.trackScript(output.args?.scriptPath || 'unknown');
+        }
+      },
 
-    'tool.execute.before': (execution) => {
-      logger.log({
-        type: 'tool.execute',
-        tool: execution.tool,
-        params: JSON.stringify(execution.params).substring(0, 100),
-      });
-    },
+      'chat.message': async ({}, { message }) => {
+        logger.log({
+          type: 'chat.message',
+          role: message.role,
+          mode: message.mode,
+          content: (message.content || '').substring(0, 200),
+          tokens: message.tokens || 0,
+        });
+        logger.trackInteraction(message.mode);
+      },
 
-    'experimental.session.compacting': (context) => {
-      logger.log({
-        type: 'session.context',
-        mode: context.mode,
-        scriptName: context.script,
-        projectName: context.project,
-        timestamp: new Date().toISOString(),
-      });
-    },
+      'experimental.session.compacting': async (input, output) => {
+        const instrParts = [];
+        if (input.mode) instrParts.push(`mode=${input.mode}`);
+        if (input.script) instrParts.push(`script=${input.script}`);
+        if (input.project) instrParts.push(`project=${input.project}`);
+        if (input.branch) instrParts.push(`branch=${input.branch}`);
+        logger.log({
+          type: 'session.compaction',
+          mode: input.mode,
+          project: input.project,
+          script: input.script,
+          branch: input.branch,
+          instructions: instrParts.join(', '),
+          timestamp: new Date().toISOString(),
+        });
+      },
+    };
+  };
 
-    'session.end': async () => {
-      await logger.shutdown();
-    },
+  // Expose logger for testing
+  plugin._logger = logger;
+  return plugin;
+}
+
+// Export both the factory (for OpenCode) and a hooks-based shim (for tests)
+const pluginFactory = createPlugin();
+
+// Backward-compatible hooks interface for tests
+const hooks = {
+  'session.start': async () => {
+    await pluginFactory._logger.initialize();
+  },
+  'chat.message': (message) => {
+    pluginFactory._logger.log({
+      type: 'chat.message',
+      role: message.role,
+      mode: message.mode,
+      content: (message.content || '').substring(0, 200),
+      tokens: message.tokens || 0,
+    });
+    pluginFactory._logger.trackInteraction(message.mode);
+  },
+  'tool.execute.before': (execution) => {
+    pluginFactory._logger.log({
+      type: 'tool.execute',
+      tool: execution.tool,
+      params: JSON.stringify(execution.params || {}).substring(0, 100),
+    });
+    if (execution.tool === 'lookup_knowledge') {
+      pluginFactory._logger.trackKnowledgeLookup(
+        execution.params?.query || '',
+        execution.params?.mode || ''
+      );
+    }
+    if (execution.tool === 'run_script') {
+      pluginFactory._logger.trackScript(execution.params?.scriptPath || 'unknown');
+    }
+  },
+  'experimental.session.compacting': (context) => {
+    const instrParts = [];
+    if (context.mode) instrParts.push(`mode=${context.mode}`);
+    if (context.script) instrParts.push(`script=${context.script}`);
+    if (context.project) instrParts.push(`project=${context.project}`);
+    if (context.branch) instrParts.push(`branch=${context.branch}`);
+    pluginFactory._logger.log({
+      type: 'session.compaction',
+      mode: context.mode,
+      project: context.project,
+      script: context.script,
+      branch: context.branch,
+      instructions: instrParts.join(', '),
+      timestamp: new Date().toISOString(),
+    });
+  },
+  'session.end': async () => {
+    await pluginFactory._logger.shutdown();
   },
 };
+
+export const SessionLoggerPlugin = pluginFactory;
+export default { hooks, _logger: pluginFactory._logger };

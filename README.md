@@ -2,7 +2,7 @@
 
 **The self-improving AI operating system.**
 
-Crux is an open-source framework that wraps any LLM and any agentic tool to extract maximum effectiveness through specialized modes, continuous learning, and battle-tested reliability patterns. It works with local models (Ollama, llama.cpp, MLX) and cloud APIs (Anthropic, OpenAI), across agentic tools (OpenCode, Aider, Claude Code), and learns from every interaction to get better over time.
+Crux is an open-source framework that wraps any LLM and any agentic tool to extract maximum effectiveness through specialized modes, continuous learning, and battle-tested reliability patterns. It works with local models (Ollama, llama.cpp, MLX) and cloud APIs (Anthropic, OpenAI), across agentic tools (OpenCode, Claude Code), and learns from every interaction to get better over time.
 
 It is not another chatbot wrapper. It is an operating system for how you work with AI.
 
@@ -24,65 +24,74 @@ When the AI needs to modify a file, it writes a script. The script goes through 
 
 This principle extends to every layer of the system:
 
-**Modes** are specialized contexts for different types of work — coding, architecture, debugging, legal analysis, psychological reflection, business strategy, and more. Each mode loads a research-optimized system prompt, restricts tool access to what's appropriate, and configures model parameters (temperature, sampling, thinking depth) for the task at hand. You don't ask the model to "act like a code reviewer." You switch to review mode, and the infrastructure configures everything for code review.
+**Modes** are specialized contexts for different types of work — coding, architecture, debugging, security analysis, design, legal analysis, psychological reflection, business strategy, and more. Each mode loads a research-optimized system prompt, restricts tool access to what's appropriate, and configures model parameters (temperature, sampling, thinking depth) for the task at hand. You don't ask the model to "act like a code reviewer." You switch to review mode, and the infrastructure configures everything for code review.
 
 **The tool hierarchy** ensures the AI always uses the most reliable tool available. Custom tools (schema-validated, atomic operations) are preferred over MCP servers (structured external integrations), which are preferred over existing scripts (proven, reusable), which are preferred over new scripts (templated, audited), which are preferred over raw shell commands (last resort, logged). The hierarchy is enforced by plugin hooks — the AI can't skip a tier because the infrastructure checks before every tool invocation.
 
-**The safety pipeline** gates every script through up to five stages before execution: deterministic pre-flight validation (structural checks, risk classification, path containment), adversarial AI audit by a separate model (semantic risk analysis), second-opinion AI audit for high-risk scripts (different model, different persona), human approval, and dry-run execution. The number of gates scales with risk — a read-only script passes through one gate in milliseconds; a production deployment script passes through all five.
+**The safety pipeline** gates every script through up to seven stages before execution: deterministic pre-flight validation, TDD/BDD enforcement, recursive security audit, adversarial AI audit by a separate model, second-opinion AI audit for high-risk scripts, human approval, and dry-run execution. The number of gates scales with risk — a read-only script passes through one gate in milliseconds; a production deployment script passes through all seven.
 
-**Continuous learning** is the engine that makes everything else improve over time. Every interaction is logged. Corrections are detected automatically and structured into knowledge entries. Tool usage patterns are analyzed to identify promotion candidates. Mode effectiveness is tracked across sessions and projects. The system surfaces daily digests with concrete, actionable recommendations — which modes need prompt revisions, which bash patterns should become tools, which knowledge gaps are causing repeat corrections. None of this requires you to do anything except approve the improvements the system proposes.
+**Continuous learning** is the engine that makes everything else improve over time. Every interaction is logged. Corrections are detected automatically and structured into knowledge entries. Tool usage patterns are analyzed to identify promotion candidates. Mode effectiveness is tracked across sessions. The system generates daily digests with concrete, actionable recommendations — which modes need prompt revisions, which bash patterns should become tools, which knowledge gaps are causing repeat corrections.
 
 ## Architecture
 
-Crux operates at five levels, each feeding the next:
+Crux operates at three scopes, each feeding the next:
 
-### Level 1: Interaction
+### Project Scope (`.crux/`)
 
-Real-time detection of corrections and mistakes during active work. When you correct the AI, a plugin hook captures the pattern (what went wrong, what the fix was) and writes a structured reflection to the session log. This reflection stays in active context for the rest of the session, providing immediate in-session learning.
+Each project gets a `.crux/` directory containing session state, corrections, knowledge entries, analytics, and pipeline configuration. This is the project's learning memory — it persists across sessions and across tool switches.
 
-### Level 2: Continuous Processing
+### User Scope (`~/.crux/`)
 
-A background processor runs alongside your work, triggered by data thresholds (accumulated corrections, interaction count, token usage) rather than timers or session boundaries. It clusters corrections into knowledge entries, analyzes tool usage patterns for promotion candidates, scores mode effectiveness, and updates project context. Learning happens continuously and invisibly.
+User-level configuration shared across all projects: mode definitions, shared knowledge, model registry, and analytics digests. Knowledge entries proven in one project can be promoted here to benefit all projects.
 
-### Level 3: Cross-Session
+### Tool Adapters
 
-Pattern detection across multiple sessions within a project. Identifies recurring correction topics (systemic gaps, not one-off mistakes), workflow fingerprints (repeated multi-step sequences that should become transaction scripts), and mode drift (using a mode for work outside its intended scope). Proposes new modes when drift patterns reveal unserved needs.
+Crux generates tool-specific configuration from `.crux/` data:
+- **Claude Code**: `.claude/agents/` with mode-specific frontmatter, `.claude/rules/` from knowledge entries, hooks for interaction logging and correction detection
+- **OpenCode**: Symlinks to `~/.config/opencode/` for modes, agents, and knowledge
+- **Cursor**: `.cursor/rules/` with plain markdown rules, `.cursor/mcp.json` for MCP registration
+- **Windsurf**: `.windsurf/rules/` with plain markdown rules, `.windsurf/mcp.json` for MCP registration
+- **MCP Server**: 37-tool FastMCP server accessible from any MCP-compatible client
 
-### Level 4: Cross-Project
+## The MCP Server
 
-Aggregation across all your projects. Detects when the same correction appears in multiple repos (indicating a mode-level weakness, not a project-level gap). Compares mode effectiveness across projects to identify knowledge base gaps. Triggers mode prompt optimization when accumulated evidence warrants it. Promotes proven scripts, tools, and knowledge entries from project-level to your personal library.
+Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 37 tools:
 
-### Level 5: Ecosystem
-
-Bidirectional learning between your system and the community. Battle-tested artifacts (scripts, tools, knowledge entries, MCP servers, mode refinements) that you promote to the public repo carry provenance metadata — what correction pattern birthed them, how many projects validated them, what measurable improvement they produced. Community contributions enter through a staging layer and must prove their value in your projects before integrating into your workflow.
+| Tool | Purpose |
+|------|---------|
+| `restore_context` | Rebuild full session context after restart |
+| `get_session_state` / `update_session` | Read and modify session state |
+| `lookup_knowledge` | Search knowledge across project and user scopes |
+| `get_mode_prompt` / `list_modes` | Access mode definitions |
+| `log_interaction` | Log conversation messages for analysis |
+| `log_correction` | Record corrections for learning |
+| `write_handoff` / `read_handoff` | Cross-mode context transfer |
+| `switch_tool_to` | Switch between AI tools with config sync |
+| `get_pipeline_config` / `get_active_gates` | Safety pipeline configuration |
+| `start_tdd_gate` / `check_tdd_status` | TDD enforcement |
+| `start_security_audit` / `security_audit_summary` | Recursive security auditing |
+| `start_design_validation` / `design_validation_summary` | Design quality checks |
+| `check_contrast` | WCAG contrast ratio validation |
+| `validate_script` | Script safety convention checking |
+| `promote_knowledge` | Promote knowledge project → user scope |
+| `get_project_context` / `get_digest` | Project and analytics access |
+| `verify_health` | Full static + liveness health check report |
+| `audit_script_8b` / `audit_script_32b` | LLM-based adversarial script auditing (Gates 4-5) |
+| `check_processor_thresholds` / `run_background_processors` | Threshold-triggered continuous learning |
+| `get_processor_status` | Background processor run history |
+| `register_project` / `get_cross_project_digest` | Cross-project analytics aggregation |
+| `figma_get_tokens` / `figma_get_components` | Figma design token extraction |
+| `bip_generate` / `bip_approve` / `bip_status` | Build-in-public content pipeline |
 
 ## What Crux Is Not
 
-**It is not tied to any specific LLM.** Crux works with Qwen, Llama, Claude, GPT, Gemini, or any model that supports tool use. The architecture is model-agnostic. When a better model comes out, Crux adapts — the modes, tools, knowledge base, and safety pipeline transfer unchanged.
+**It is not tied to any specific LLM.** Crux works with Qwen, Llama, Claude, GPT, Gemini, or any model that supports tool use. The architecture is model-agnostic.
 
-**It is not tied to any specific agentic tool.** The initial implementation targets OpenCode CLI, with planned support for Aider, Claude Code, and Continue.dev. The modes, knowledge base, scripts library, and learning pipeline are tool-independent — they're files on disk with standard formats (Markdown, JSON, JSONL, JavaScript) that any tool can consume.
+**It is not tied to any specific agentic tool.** Current adapters support OpenCode, Claude Code, Cursor, and Windsurf, with the MCP server accessible from any MCP-compatible client. Modes, knowledge, scripts, and learning data are tool-independent files on disk.
 
-**It is not just for code.** Fifteen built-in modes span coding, architecture, debugging, data analysis, writing, psychological reflection, legal research, business strategy, AI infrastructure, and systems administration. Any knowledge domain that benefits from specialized context, tool restrictions, and accumulated learning can become a Crux mode.
+**It is not just for code.** Twenty-three built-in modes span coding, architecture, debugging, testing, security analysis, design (UI, systems, accessibility, responsive), data analysis, writing, psychological reflection, legal research, business strategy, AI infrastructure, and systems administration.
 
-**It is not a prompt library.** Prompts are one component. The value is in the infrastructure: the script execution pipeline, the continuous learning system, the tool hierarchy enforcement, the adversarial safety audits, the cross-project knowledge accumulation. These are code, not prompts.
-
-## Addressing Skepticism
-
-**"Self-improving AI sounds like marketing language."**
-
-Nothing in Crux involves the AI modifying its own weights or doing anything magical. "Self-improving" means: corrections are captured as structured data, patterns are detected by scripted analytics, and improvements are proposed for human approval. The AI reads better knowledge entries and follows better-tuned mode prompts over time because the infrastructure puts better information in front of it. The human approves every structural change. The scripts do the maintenance. The AI just benefits from a progressively better-informed environment.
-
-**"Local models aren't good enough for serious work."**
-
-A 32B model at Q8 quantization, running on Apple Silicon with properly tuned sampling parameters, thinking mode for complex tasks, and a curated knowledge base providing domain context, is a remarkably capable system. Crux's architecture specifically addresses the gap between local and frontier models: the safety pipeline catches more mistakes, the knowledge base reduces the need for the model to reason from scratch, and the graceful degradation system tells you exactly when a task exceeds local model capability so you can make an informed decision about when cloud API calls are worth the cost.
-
-**"This is over-engineered for a coding assistant."**
-
-If all you need is autocomplete and occasional chat, Crux is not for you. Crux is for people who use AI as a primary working tool across multiple domains and multiple projects, who have experienced the frustration of AI assistants that forget everything between sessions, who have been burned by AI confidently making the wrong change to a production file, and who want their investment in correcting and teaching an AI system to compound over time rather than evaporate at session close.
-
-**"I don't want to learn a whole new system."**
-
-The quick start below takes five minutes. After that, you work normally — write code, ask questions, review PRs. Crux operates in the background. The daily digest tells you what improved and what needs attention. The modes are there when you want them. The safety pipeline runs automatically. The learning happens without you thinking about it.
+**It is not a prompt library.** Prompts are one component. The value is in the infrastructure: the safety pipeline, the continuous learning system, the tool hierarchy enforcement, the TDD gate, the recursive security audits, the cross-session knowledge accumulation. These are code, not prompts.
 
 ---
 
@@ -90,40 +99,56 @@ The quick start below takes five minutes. After that, you work normally — writ
 
 ### Prerequisites
 
-- macOS with Apple Silicon (M1/M2/M3/M4) or Linux with NVIDIA GPU
-- 32GB+ RAM (64GB recommended for Q8 quantization)
-- Git and Homebrew installed
+- macOS (Apple Silicon) or Linux
+- Python 3.10+
+- Git
 
-### Install
-
-```bash
-git clone https://github.com/yourusername/crux.git
-cd crux
-chmod +x setup.sh
-./setup.sh
-```
-
-The setup script is interactive. It detects your hardware, recommends optimal model configuration, installs everything, and verifies the installation. Takes 5-15 minutes depending on model download speed.
-
-### First Session
+### Claude Code
 
 ```bash
+git clone https://github.com/trinsiklabs/crux.git ~/.crux
+~/.crux/setup.sh        # Select "Claude Code" — installs deps + CLI (~10 seconds)
+source ~/.zshrc
+
 cd your-project
-opencode
+crux adopt               # Sets up .crux/, MCP server (37 tools), and hooks
 ```
 
-Switch modes with Tab or `/mode <name>`. Available modes:
+Start Claude Code in your project. The Crux MCP tools and hooks (correction detection, interaction logging, session context) are automatically available.
+
+### OpenCode (Local LLMs)
+
+```bash
+git clone https://github.com/trinsiklabs/crux.git ~/.crux
+~/.crux/setup.sh        # Select "OpenCode" — full setup (Ollama, models, symlinks)
+source ~/.zshrc
+
+cd your-project
+crux switch opencode     # Or just launch opencode — MCP config is global
+```
+
+### Switch Tools Anytime
+
+Already set up? Switch between tools without losing session state:
+
+```bash
+crux switch cursor       # Generate .cursor/rules/ + .cursor/mcp.json
+crux switch windsurf     # Generate .windsurf/rules/ + .windsurf/mcp.json
+crux switch claude-code  # Restore Claude Code hooks + MCP config
+```
+
+### Modes
+
+Switch modes via your tool's agent/mode selector:
 
 ```
-build-py    build-ex    plan          infra-architect
-review      debug       explain       analyst
-writer      psych       legal         strategist
-ai-infra    mac         docker
+build-py          build-ex          plan              infra-architect
+review            debug             explain           analyst
+writer            psych             legal             strategist
+ai-infra          mac               docker            test
+security          marketing         build-in-public   design-ui
+design-system     design-review     design-responsive design-accessibility
 ```
-
-Everything else happens automatically. Write code, get corrections captured, watch your system get smarter.
-
-See the [User Manual](docs/manual.md) for comprehensive usage documentation.
 
 ---
 
@@ -131,41 +156,94 @@ See the [User Manual](docs/manual.md) for comprehensive usage documentation.
 
 ```
 crux/
-├── setup.sh                    # Interactive setup script (3,065 lines)
-├── docs/
-│   ├── manual.md               # User guide and tutorial
-│   └── setup-reference.md      # Setup script documentation
-├── modes/                      # 15 mode definitions + template
-├── plugins/                    # 5 plugins (session logger, think router, etc.)
-├── tools/                      # 7 custom tools (script management, knowledge, etc.)
-├── commands/                   # 11 custom commands
-├── scripts/templates/          # Script and transaction templates
+├── setup.sh                    # Interactive installer (symlink-based)
+├── bin/crux                    # CLI wrapper (setup, update, doctor, adopt)
+├── .crux/                      # Project-level Crux data (sessions, analytics, knowledge)
+├── scripts/
+│   └── lib/                    # 32 Python modules (stdlib + mcp dependency)
+│       ├── crux_mcp_server.py  # 34-tool FastMCP server
+│       ├── crux_mcp_handlers.py# Pure handler functions (no MCP deps)
+│       ├── crux_hooks.py       # Claude Code hook handlers
+│       ├── crux_session.py     # Session state management
+│       ├── crux_sync.py        # Tool adapter layer (OpenCode, Claude Code, Cursor, Windsurf)
+│       ├── crux_switch.py      # Tool switching with config sync
+│       ├── crux_adopt.py       # Mid-session project onboarding
+│       ├── crux_tdd_gate.py    # TDD/BDD enforcement gate
+│       ├── crux_security_audit.py # Recursive security audit engine
+│       ├── crux_design_validation.py # WCAG, contrast, touch targets
+│       ├── crux_pipeline_config.py   # Gate activation per mode/risk
+│       ├── crux_ollama.py            # Ollama REST API client (stdlib only)
+│       ├── crux_llm_audit.py        # LLM-based script auditing (Gates 4-5)
+│       ├── crux_background_processor.py # Threshold-triggered continuous learning
+│       ├── crux_cross_project.py    # Cross-project analytics aggregation
+│       ├── crux_figma.py            # Figma API client (design tokens)
+│       ├── crux_cross_domain.py     # Cross-domain knowledge flows
+│       ├── crux_design_handoff.py    # Design-to-code handoff
+│       ├── crux_knowledge_categories.py # Structured KB taxonomy
+│       ├── extract_corrections.py    # Correction clustering
+│       ├── generate_digest.py        # Daily analytics digest
+│       ├── promote_knowledge.py      # Three-tier knowledge promotion
+│       ├── model_auto_evaluate.py    # Model quality comparison
+│       ├── model_registry_update.py  # Ollama model discovery
+│       ├── preflight_validator.py    # Gate 1: script validation
+│       ├── audit_modes.py           # Mode prompt quality auditing
+│       └── ...
+├── modes/                      # 23 mode definitions (MD with YAML frontmatter)
+├── plugins/                    # 6 OpenCode plugins (JS)
+│   ├── session-logger.js       # JSONL logging, crash recovery
+│   ├── think-router.js         # /think routing per mode
+│   ├── correction-detector.js  # Real-time correction capture
+│   ├── compaction-hook.js      # Context compaction with logging
+│   ├── token-budget.js         # Per-mode token tracking
+│   └── tool-enforcer.js        # Mode-based tool access control
+├── tools/                      # 9 custom tools (JS)
+│   ├── run_script.js           # Safety pipeline execution
+│   ├── promote_script.js       # Script promotion (session → lib)
+│   ├── list_scripts.js         # Script discovery
+│   ├── project_context.js      # PROJECT.md reader
+│   ├── lookup_knowledge.js     # Knowledge retrieval
+│   ├── suggest_handoff.js      # Cross-mode handoff
+│   ├── manage_models.js        # Model registry CRUD
+│   ├── marketing_generate.js   # Content pipeline
+│   └── marketing_update_state.js
+├── commands/                   # Custom command definitions (MD)
 ├── templates/                  # AGENTS.md, PROJECT.md, opencode.json
 ├── knowledge/                  # Knowledge base template
-├── CONTRIBUTING.md             # Contribution guidelines
+├── docs/                       # Architecture, modes, safety, learning docs
+├── tests/                      # 1480+ tests (pytest + node:test + bats)
+├── CONTRIBUTING.md
 ├── LICENSE                     # MIT
 └── README.md
 ```
 
-## The 15 Modes
+## The 24 Modes
 
 | Category | Mode | Focus |
 |----------|------|-------|
 | Coding | build-py | Python, security-first |
 | Coding | build-ex | Elixir/Phoenix/Ash |
+| Coding | test | Test-first development |
 | Architecture | plan | Software design |
 | Architecture | infra-architect | Deployment, CI/CD |
-| Quality | review | Code review, security priority |
+| Quality | review | Code review |
 | Quality | debug | Root cause analysis |
+| Quality | security | Adversarial vulnerability analysis |
 | Communication | explain | Teaching, mentoring |
 | Communication | analyst | Data analysis |
 | Communication | writer | Professional writing |
+| Communication | marketing | Marketing strategy, positioning |
+| Communication | build-in-public | Shipping update content |
 | Decision-Making | psych | ACT, attachment theory, shadow work |
 | Decision-Making | legal | Legal research, contracts |
 | Decision-Making | strategist | First principles, pre-mortems |
 | Infrastructure | ai-infra | LLM stack optimization |
 | Infrastructure | mac | macOS administration |
 | Infrastructure | docker | Containers, Linux |
+| Design | design-ui | UI component implementation |
+| Design | design-system | Design system creation |
+| Design | design-review | Design quality review |
+| Design | design-responsive | Responsive layout |
+| Design | design-accessibility | WCAG compliance |
 
 ## The Tool Hierarchy
 
@@ -176,15 +254,27 @@ crux/
 | 2 | MCP Servers | Protocol-enforced external access |
 | 3 | Library Scripts | Tested, versioned, promoted |
 | 4 | New Scripts | Templated, audited before run |
-| 5 | Raw Bash | Logged, read-only only, last resort |
+| 5 | Raw Bash | Logged, last resort |
 
 ## The Safety Pipeline
 
-| Risk Level | Gates | Applies To |
-|------------|-------|-----------|
-| Low | Pre-flight validation | Read-only operations |
-| Medium | Pre-flight + 8B adversarial audit + DRY_RUN | File modifications, configs |
-| High | Pre-flight + 8B audit + 32B audit + human approval + DRY_RUN | Deployment, database, deletes |
+| Gate | Stage | Implementation |
+|------|-------|----------------|
+| 1 | Pre-flight validation | `preflight_validator.py` — structural checks, risk classification |
+| 2 | TDD/BDD enforcement | `crux_tdd_gate.py` — red/green phase tracking, coverage |
+| 3 | Recursive security audit | `crux_security_audit.py` — 7 categories, convergence detection |
+| 4 | 8B adversarial audit | `crux_llm_audit.py` + `run_script.js` — separate model reviews via Ollama |
+| 5 | 32B second opinion | `crux_llm_audit.py` + `run_script.js` — high-risk only, larger model review |
+| 6 | Human approval | `run_script.js` — required for high-risk scripts |
+| 7 | DRY_RUN execution | `run_script.js` — safe preview for medium+ risk |
+
+## Test Suite
+
+1480+ tests across three frameworks:
+
+- **Python (pytest)**: 1070+ tests across 30+ test files covering all Python modules with 100% coverage enforced
+- **JavaScript (node:test)**: 199 tests covering plugins and tools
+- **Bash (bats)**: 213 tests covering setup, CLI, and repo structure
 
 ## Contributing
 

@@ -1,3 +1,13 @@
+---
+temperature: 0.7
+mode: primary
+description: Professional technical writing
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+  webfetch: deny
+---
 # Mode: writer
 
 Professional writing and communication.
@@ -15,7 +25,7 @@ Professional writing and communication.
 - One idea per sentence when possible
 - Paragraph: One main idea with supporting sentences
 - Use examples and specifics
-- Avoid jargon unless audience demands it
+- Use plain language; reserve jargon for expert audiences
 - Structure for scanning (headers, lists, emphasis)
 - Read aloud mentally for rhythm
 

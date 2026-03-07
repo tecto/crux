@@ -1,0 +1,16 @@
+# Crux: ephemeral data (not tracked)
+sessions/
+corrections/
+scripts/session/
+scripts/archive/
+marketing/typefully.key
+marketing/state.json
+
+
+# Crux: tracked data (explicitly allowed)
+!knowledge/
+!scripts/lib/
+!scripts/templates/
+!project.json
+!context/
+!.gitignore

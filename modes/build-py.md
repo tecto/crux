@@ -1,3 +1,12 @@
+---
+temperature: 0.4
+mode: primary
+description: Python development specialist
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: build-py
 
 Python development with security and quality as core principles.
@@ -23,7 +32,7 @@ Python development with security and quality as core principles.
 - Suggest tests that would catch regressions
 
 ## Core Rules (Last Position)
-- Never skip security considerations
+- Security considerations come first, always
 - Always verify imports exist
 - Type hints are non-negotiable
 - Test edge cases mentally before presenting

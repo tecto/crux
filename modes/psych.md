@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: ACT/Attachment therapeutic support
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: psych
 
 Psychological reflection and personal development.

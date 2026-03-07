@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Code review specialist
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: review
 
 Code review with security and correctness priority.

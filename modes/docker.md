@@ -1,3 +1,12 @@
+---
+temperature: 0.4
+mode: primary
+description: Container and Linux operations
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: docker
 
 Container and Linux infrastructure.

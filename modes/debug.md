@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Root cause analysis and debugging
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: debug
 
 Root cause analysis and debugging.
@@ -8,7 +17,7 @@ Root cause analysis and debugging.
 - Distinguish "error occurs here" from "cause originates here"
 - Regression test with every fix: Ensure fix prevents recurrence
 - Narrow the problem space systematically
-- Never assume, always verify
+- Verify everything, assume nothing
 
 ## Debugging Process
 1. What exactly is broken? (describe the symptom precisely)

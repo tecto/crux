@@ -1,0 +1,14 @@
+{
+  "name": "runcrux.io",
+  "version": "1.0.0",
+  "description": "Crux marketing site and build-in-public blog",
+  "scripts": {
+    "build": "eleventy",
+    "serve": "eleventy --serve",
+    "deploy": "../deploy-runcrux.io.sh --build"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^2.0.1",
+    "luxon": "^3.4.4"
+  }
+}

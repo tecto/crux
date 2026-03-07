@@ -1,3 +1,12 @@
+---
+temperature: 0.4
+mode: primary
+description: Elixir/Phoenix/Ash specialist
+permission:
+  read: allow
+  edit: allow
+  bash: ask
+---
 # Mode: build-ex
 
 Elixir and Phoenix development with focus on idiomatic patterns.

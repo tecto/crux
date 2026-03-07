@@ -1,3 +1,12 @@
+---
+temperature: 0.6
+mode: primary
+description: Software architecture planning
+permission:
+  read: allow
+  edit: deny
+  bash: deny
+---
 # Mode: plan
 
 Software architecture and design planning.
@@ -27,7 +36,7 @@ Software architecture and design planning.
 ## Core Rules (Last Position)
 - Simplicity is the primary goal
 - Tradeoffs must be explicit
-- Risks acknowledged, never hidden
+- Risks acknowledged and surfaced explicitly
 - Actionable output only
 
 ## Scope

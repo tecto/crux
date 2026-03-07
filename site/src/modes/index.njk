@@ -1,0 +1,97 @@
+---
+layout: base.njk
+title: modes - crux
+description: 23 specialized modes for different types of AI-assisted work
+---
+
+<h1>modes</h1>
+
+<p>crux ships with 23 specialized modes. each configures the AI's system prompt, temperature, and tool access for a specific type of work.</p>
+
+<p>see <a href="/docs/modes/">modes system docs</a> for how to create custom modes.</p>
+
+<h2>coding</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>build-py</strong></td><td>Python development, security-first</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>build-ex</strong></td><td>Elixir / Phoenix / Ash</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>test</strong></td><td>test-first development</td><td>0.4</td><td>full</td></tr>
+  </tbody>
+</table>
+
+<h2>architecture</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>plan</strong></td><td>software design and architecture</td><td>0.6</td><td>read-only</td></tr>
+    <tr><td><strong>infra-architect</strong></td><td>deployment, CI/CD, infrastructure</td><td>0.6</td><td>read-only</td></tr>
+  </tbody>
+</table>
+
+<h2>quality</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>review</strong></td><td>code review</td><td>0.6</td><td>read-only</td></tr>
+    <tr><td><strong>debug</strong></td><td>root cause analysis</td><td>0.6</td><td>full</td></tr>
+    <tr><td><strong>security</strong></td><td>adversarial vulnerability analysis</td><td>0.6</td><td>full</td></tr>
+  </tbody>
+</table>
+
+<h2>communication</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>explain</strong></td><td>teaching, mentoring</td><td>0.4</td><td>read-only</td></tr>
+    <tr><td><strong>analyst</strong></td><td>data analysis</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>writer</strong></td><td>professional writing</td><td>0.4</td><td>limited</td></tr>
+    <tr><td><strong>marketing</strong></td><td>build-in-public content</td><td>0.4</td><td>limited</td></tr>
+  </tbody>
+</table>
+
+<h2>decision-making</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>psych</strong></td><td>ACT, attachment theory, shadow work</td><td>0.6</td><td>read-only</td></tr>
+    <tr><td><strong>legal</strong></td><td>legal research, contracts</td><td>0.6</td><td>limited</td></tr>
+    <tr><td><strong>strategist</strong></td><td>first principles, pre-mortems</td><td>0.6</td><td>limited</td></tr>
+  </tbody>
+</table>
+
+<h2>infrastructure</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>ai-infra</strong></td><td>LLM stack optimization</td><td>0.5</td><td>full</td></tr>
+    <tr><td><strong>mac</strong></td><td>macOS administration</td><td>0.4</td><td>limited</td></tr>
+    <tr><td><strong>docker</strong></td><td>containers, Linux</td><td>0.4</td><td>full</td></tr>
+  </tbody>
+</table>
+
+<h2>design</h2>
+<table>
+  <thead>
+    <tr><th>mode</th><th>focus</th><th>temp</th><th>tools</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>design-ui</strong></td><td>UI component implementation</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>design-system</strong></td><td>design system creation</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>design-review</strong></td><td>design quality review</td><td>0.6</td><td>read-only</td></tr>
+    <tr><td><strong>design-responsive</strong></td><td>responsive layout</td><td>0.4</td><td>full</td></tr>
+    <tr><td><strong>design-accessibility</strong></td><td>WCAG compliance</td><td>0.4</td><td>full</td></tr>
+  </tbody>
+</table>

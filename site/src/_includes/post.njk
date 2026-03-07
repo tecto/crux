@@ -1,0 +1,27 @@
+---
+layout: base.njk
+---
+
+<article class="post">
+  <header class="post-header">
+    <h1>{{ title }}</h1>
+    <time datetime="{{ date | htmlDateString }}">{{ date | readableDate }}</time>
+    {% if tags %}
+    <div class="tags">
+      {% for tag in tags %}
+      <span class="tag">{{ tag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </header>
+  
+  <div class="post-content">
+    {{ content | safe }}
+  </div>
+  
+  {% if tweet_id %}
+  <footer class="post-footer">
+    <p><a href="https://x.com/splntrb/status/{{ tweet_id }}">originally posted on x</a></p>
+  </footer>
+  {% endif %}
+</article>

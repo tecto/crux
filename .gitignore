@@ -1,2 +1,9 @@
 EXTRACTION_SUMMARY.md
 INDEX.md
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.coverage
+.DS_Store
+site/_site/
