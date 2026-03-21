@@ -210,6 +210,138 @@ def get_tier_for_model(model: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Escalation logic
+# ---------------------------------------------------------------------------
+
+
+ESCALATION_RULES: dict[str, dict] = {
+    "validation_failure": {
+        "action": "tier_up",
+        "max_escalations": 2,
+    },
+    "quality_failure": {
+        "action": "tier_up",
+        "max_escalations": 1,
+    },
+    "provider_error": {
+        "action": "next_provider_same_tier",
+        "max_retries": 2,
+    },
+    "timeout": {
+        "action": "next_provider_same_tier",
+        "max_retries": 1,
+    },
+}
+
+
+@dataclass
+class EscalationResult:
+    escalated: bool
+    new_model: str | None
+    new_tier: str | None
+    reason: str
+
+
+def escalate(
+    current_model: str,
+    failure_type: str,
+    attempt: int = 0,
+    available_providers: list[str] | None = None,
+) -> EscalationResult:
+    """Determine the next model to try after a failure.
+
+    Args:
+        current_model: The model that failed (provider/model format)
+        failure_type: Type of failure (validation_failure, quality_failure,
+                      provider_error, timeout)
+        attempt: How many escalations have already happened for this task
+        available_providers: Which providers have credentials
+
+    Returns:
+        EscalationResult with the next model to try, or escalated=False if
+        we've exhausted options.
+    """
+    rule = ESCALATION_RULES.get(failure_type)
+    if rule is None:
+        return EscalationResult(
+            escalated=False, new_model=None, new_tier=None,
+            reason=f"Unknown failure type: {failure_type}",
+        )
+
+    current_tier = get_tier_for_model(current_model)
+
+    if rule["action"] == "tier_up":
+        max_esc = rule["max_escalations"]
+        if attempt >= max_esc:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=None,
+                reason=f"Max escalations ({max_esc}) reached for {failure_type}",
+            )
+        if current_tier is None:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=None,
+                reason=f"Cannot determine tier for model: {current_model}",
+            )
+        next_tier = tier_up(current_tier)
+        if next_tier is None:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=None,
+                reason=f"Already at highest tier ({current_tier})",
+            )
+        new_model = resolve_tier(next_tier, available_providers)
+        if new_model is None:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=next_tier,
+                reason=f"No model available at tier {next_tier}",
+            )
+        return EscalationResult(
+            escalated=True, new_model=new_model, new_tier=next_tier,
+            reason=f"Escalated from {current_tier} to {next_tier} due to {failure_type}",
+        )
+
+    if rule["action"] == "next_provider_same_tier":
+        max_retries = rule["max_retries"]
+        if attempt >= max_retries:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=None,
+                reason=f"Max retries ({max_retries}) reached for {failure_type}",
+            )
+        if current_tier is None:
+            return EscalationResult(
+                escalated=False, new_model=None, new_tier=None,
+                reason=f"Cannot determine tier for model: {current_model}",
+            )
+        # Find next model in the same tier that uses a different provider
+        current_provider, _ = _parse_model(current_model)
+        if available_providers is None:
+            available_providers = [
+                p for p in ["ollama", "anthropic", "openai"]
+                if _provider_available(p)
+            ]
+        for model in TIERS.get(current_tier, []):
+            provider, _ = _parse_model(model)
+            if provider != current_provider and provider in available_providers:
+                return EscalationResult(
+                    escalated=True, new_model=model, new_tier=current_tier,
+                    reason=f"Switched provider from {current_provider} to {provider} due to {failure_type}",
+                )
+        return EscalationResult(
+            escalated=False, new_model=None, new_tier=current_tier,
+            reason=f"No alternative provider at tier {current_tier}",
+        )
+
+    return EscalationResult(
+        escalated=False, new_model=None, new_tier=None,
+        reason=f"Unknown action: {rule['action']}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Available tiers
+# ---------------------------------------------------------------------------
+
+
 def get_available_tiers(
     available_providers: list[str] | None = None,
 ) -> dict[str, str | None]:

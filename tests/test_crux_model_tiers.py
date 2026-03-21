@@ -285,3 +285,116 @@ def test_parse_model_with_provider():
 def test_parse_model_without_provider():
     from scripts.lib.crux_model_tiers import _parse_model
     assert _parse_model("qwen3:8b") == ("ollama", "qwen3:8b")
+
+
+# --- Escalation ---
+
+
+def test_escalate_validation_failure():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3:8b", "validation_failure", attempt=0, available_providers=["ollama", "anthropic"])
+    assert result.escalated is True
+    assert result.new_tier is not None
+
+
+def test_escalate_validation_failure_max_reached():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3:8b", "validation_failure", attempt=2, available_providers=["ollama"])
+    assert result.escalated is False
+    assert "Max escalations" in result.reason
+
+
+def test_escalate_quality_failure():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("openai/gpt-5-mini", "quality_failure", attempt=0, available_providers=["anthropic", "openai"])
+    assert result.escalated is True
+    assert result.new_tier is not None
+
+
+def test_escalate_quality_failure_max_reached():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("openai/gpt-5-mini", "quality_failure", attempt=1, available_providers=["openai"])
+    assert result.escalated is False
+
+
+def test_escalate_provider_error():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3-coder:30b", "provider_error", attempt=0, available_providers=["ollama", "anthropic"])
+    assert result.escalated is True
+    assert "anthropic" in result.new_model
+
+
+def test_escalate_provider_error_no_alternative():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3-coder:30b", "provider_error", attempt=0, available_providers=["ollama"])
+    assert result.escalated is False
+    assert "No alternative" in result.reason
+
+
+def test_escalate_provider_error_max_retries():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3-coder:30b", "provider_error", attempt=2, available_providers=["ollama", "anthropic"])
+    assert result.escalated is False
+
+
+def test_escalate_timeout():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3:8b", "timeout", attempt=0, available_providers=["ollama", "anthropic"])
+    assert result.escalated is True
+
+
+def test_escalate_timeout_max_retries():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3:8b", "timeout", attempt=1, available_providers=["ollama"])
+    assert result.escalated is False
+
+
+def test_escalate_unknown_failure():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("ollama/qwen3:8b", "unknown_type", attempt=0)
+    assert result.escalated is False
+    assert "Unknown failure" in result.reason
+
+
+def test_escalate_already_at_frontier():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("anthropic/claude-opus-4-5", "validation_failure", attempt=0, available_providers=["anthropic"])
+    assert result.escalated is False
+    assert "highest tier" in result.reason
+
+
+def test_escalate_unknown_model():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("unknown/model", "validation_failure", attempt=0)
+    assert result.escalated is False
+    assert "Cannot determine tier" in result.reason
+
+
+def test_escalate_no_model_at_next_tier():
+    from scripts.lib.crux_model_tiers import escalate
+    # micro → fast, but only unknown providers available
+    result = escalate("ollama/qwen3:8b", "validation_failure", attempt=0, available_providers=[])
+    assert result.escalated is False
+    assert "No model available" in result.reason
+
+
+def test_escalate_provider_error_unknown_model():
+    from scripts.lib.crux_model_tiers import escalate
+    result = escalate("unknown/model", "provider_error", attempt=0)
+    assert result.escalated is False
+
+
+def test_escalate_provider_error_auto_detect():
+    from scripts.lib.crux_model_tiers import escalate
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+        result = escalate("ollama/qwen3-coder:30b", "provider_error", attempt=0)
+        assert result.escalated is True
+
+
+def test_escalation_result_fields():
+    from scripts.lib.crux_model_tiers import EscalationResult
+    r = EscalationResult(escalated=True, new_model="m", new_tier="t", reason="r")
+    assert r.escalated is True
+    assert r.new_model == "m"
+    assert r.new_tier == "t"
+    assert r.reason == "r"
