@@ -469,3 +469,54 @@ class TestAdoptEdgeCases:
         )
         assert result.success
         assert result.files_discovered == []
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests — lines 63, 108, 235, 275-276
+# ---------------------------------------------------------------------------
+
+class TestAdoptCoverageGaps:
+    def test_parse_git_history_returns_empty_for_nonexistent_dir(self):
+        """Line 63: validate_and_canonicalize_dir returns None."""
+        from scripts.lib.crux_adopt import _parse_git_history
+        files, msgs = _parse_git_history("/nonexistent/path/xyz")
+        assert files == []
+        assert msgs == []
+
+    def test_detect_project_context_returns_fallback_for_nonexistent_dir(self):
+        """Line 108: validate_and_canonicalize_dir returns None."""
+        from scripts.lib.crux_adopt import _detect_project_context
+        result = _detect_project_context("/nonexistent/path/xyz")
+        assert "Unable to detect" in result
+
+    def test_unsafe_knowledge_entry_name_is_skipped(self, project_no_git):
+        """Line 235: knowledge entry with unsafe name is skipped."""
+        result = adopt_project(
+            project_dir=project_no_git["project"],
+            home=project_no_git["home"],
+            knowledge_entries={"../evil": "# bad content", "good-entry": "# Good\nSafe content."},
+        )
+        assert result.success
+        k_dir = os.path.join(project_no_git["project"], ".crux", "knowledge")
+        # The unsafe entry should not have been written
+        assert not os.path.exists(os.path.join(k_dir, "../evil.md"))
+        # The safe entry should exist
+        assert os.path.exists(os.path.join(k_dir, "good-entry.md"))
+
+    def test_corrupt_settings_local_json_handled(self, project_no_git):
+        """Lines 275-276: corrupt settings.local.json is handled gracefully."""
+        # First adopt to create .claude dir
+        adopt_project(
+            project_dir=project_no_git["project"],
+            home=project_no_git["home"],
+        )
+        # Corrupt the settings.local.json
+        settings_path = os.path.join(project_no_git["project"], ".claude", "settings.local.json")
+        with open(settings_path, "w") as f:
+            f.write("not valid json!!!")
+        # Re-adopt — should handle corrupt file gracefully
+        result = adopt_project(
+            project_dir=project_no_git["project"],
+            home=project_no_git["home"],
+        )
+        assert result.success

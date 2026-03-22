@@ -237,6 +237,7 @@ class TestHistory:
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Escalation Rules
 # ---------------------------------------------------------------------------
 
@@ -278,3 +279,48 @@ class TestEscalationRules:
         assert "plan_implemented" in cfg.escalation_rules
         assert "x_post" in cfg.escalation_rules
         assert "blog_post" in cfg.escalation_rules
+=======
+# Coverage gap tests — lines 135, 138-139, 156, 161-162
+# ---------------------------------------------------------------------------
+
+class TestBipCoverageGaps:
+    def test_cooldown_with_naive_timestamp(self, bip_dir):
+        """Line 135: naive timestamp (no tzinfo) gets UTC assigned."""
+        old = datetime.now(timezone.utc) - timedelta(minutes=20)
+        naive_ts = old.strftime("%Y-%m-%dT%H:%M:%S")  # No timezone suffix
+        state = BIPState(last_queued_at=naive_ts)
+        save_state(state, bip_dir)
+        assert check_cooldown(bip_dir, cooldown_minutes=15) is True
+
+    def test_cooldown_with_invalid_timestamp(self, bip_dir):
+        """Lines 138-139: invalid timestamp returns True (ok to post)."""
+        state = BIPState(last_queued_at="not-a-timestamp")
+        save_state(state, bip_dir)
+        assert check_cooldown(bip_dir, cooldown_minutes=15) is True
+
+    def test_history_skips_blank_lines(self, bip_dir):
+        """Line 156: blank lines in history.jsonl are skipped."""
+        record_history(bip_dir, source_key="git:abc", draft_preview="test")
+        # Insert blank lines
+        hist_path = os.path.join(bip_dir, "history.jsonl")
+        with open(hist_path, "a") as f:
+            f.write("\n\n")
+        record_history(bip_dir, source_key="git:def", draft_preview="test2")
+        history = load_history(bip_dir)
+        assert len(history) == 2
+
+    def test_history_returns_empty_on_os_error(self, bip_dir, monkeypatch):
+        """Lines 161-162: OSError reading history returns empty list."""
+        record_history(bip_dir, source_key="git:abc", draft_preview="test")
+        # Make the file unreadable by monkeypatching open
+        original_open = open
+
+        def bad_open(path, *args, **kwargs):
+            if "history.jsonl" in str(path):
+                raise OSError("Permission denied")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", bad_open)
+        history = load_history(bip_dir)
+        assert history == []
+>>>>>>> 4c3c8d1 (consolidate: docs, tests, self-adoption, security hardening, and build plans)

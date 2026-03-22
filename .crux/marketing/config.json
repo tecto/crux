@@ -1,0 +1,38 @@
+{
+  "typefully": {
+    "social_set_id": 288244,
+    "api_key_path": ".crux/marketing/typefully.key",
+    "account": "@splntrb",
+    "plan": "creator"
+  },
+  "triggers": {
+    "commit_threshold": 4,
+    "token_threshold": 50000,
+    "interaction_threshold": 30,
+    "high_signal_events": ["test_green", "new_mcp_tool", "git_tag", "pr_merge", "crux_switch", "crux_adopt", "knowledge_promoted", "correction_detected"],
+    "cooldown_minutes": 15,
+    "target_posts_per_hour": 1,
+    "quiet_hours": null
+  },
+  "voice": {
+    "style": "all lowercase except proper nouns",
+    "tone": "technical, direct, no hype, builder energy",
+    "never": ["Revolutionary", "Game-changing", "Excited to announce", "I'm thrilled"],
+    "examples_path": ".crux/marketing/voice-samples.md"
+  },
+  "defaults": {
+    "platforms": ["x"],
+    "schedule_mode": "now"
+  },
+  "website": {
+    "domain": "runcrux.io",
+    "site_path": "site/",
+    "blog_path": "site/src/blog/",
+    "deploy_command": "cd site && npm run build && rsync -avz _site/ user@server:/var/www/runcrux.io/",
+    "generate_blog_post": true,
+    "blog_post_threshold": "high_signal",
+    "cross_link_tweets": true
+  },
+  "state_path": ".crux/marketing/state.json",
+  "history_path": ".crux/marketing/history.json"
+}

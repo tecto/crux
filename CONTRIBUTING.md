@@ -24,7 +24,7 @@ Improvements to existing mode prompts, backed by data. Don't submit "I think thi
 - Must include before/after prompt text
 - Must include correction rate data or other measurable evidence
 - Must follow mode template rules: positive instructions, simple task-relevant persona, critical rules at beginning and end, 150-200 word length
-- Must pass the automated mode audit (run `scripts/lib/audit-mode.sh <mode-file>`)
+- Must pass the automated mode audit (run `python3 scripts/lib/audit_modes.py <mode-file>`)
 
 ### New Mode Proposals
 
@@ -86,7 +86,7 @@ Guides, tutorials, examples, and improvements to existing docs.
 1. Fork the repository
 2. Create a feature branch (`git checkout -b contribute/knowledge-ash-migrations`)
 3. Add your contribution following the requirements above
-4. Run the validation script: `./scripts/lib/validate-contribution.sh`
+4. Run the validation script: `./scripts/lib/validate-contribution.sh` *(planned — not yet implemented; manually verify requirements above)*
 5. Commit with a descriptive message explaining what you're contributing and why
 6. Open a pull request using the appropriate template
 

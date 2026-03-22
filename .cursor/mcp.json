@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "crux": {
+      "command": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "args": [
+        "-m",
+        "scripts.lib.crux_mcp_server"
+      ],
+      "env": {
+        "CRUX_PROJECT": "/Users/user/personal/crux",
+        "CRUX_HOME": "/var/folders/m4/7z6mv1014pl9y5tgsr0g4p1c0000gn/T/tmp.LuMGrZIQzC",
+        "PYTHONPATH": "/Users/user/personal/crux"
+      }
+    }
+  }
+}

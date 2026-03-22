@@ -12,6 +12,8 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from scripts.lib.crux_security import secure_write_file
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -75,9 +77,7 @@ def save_session(state: SessionState, project_crux_dir: str) -> None:
     """Persist session state to disk."""
     state.updated_at = _now_iso()
     path = _state_path(project_crux_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(state.to_dict(), f, indent=2)
+    secure_write_file(path, json.dumps(state.to_dict(), indent=2))
 
 
 def load_session(project_crux_dir: str) -> SessionState:
@@ -125,9 +125,7 @@ def update_session(
 def write_handoff(content: str, project_crux_dir: str) -> None:
     """Write handoff context for the next mode or tool."""
     path = _handoff_path(project_crux_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(content)
+    secure_write_file(path, content)
 
 
 def read_handoff(project_crux_dir: str) -> str | None:

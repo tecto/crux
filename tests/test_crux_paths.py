@@ -229,3 +229,35 @@ class TestCruxPaths:
                dirs.index(str(home / ".crux" / "knowledge" / "by-mode" / "debug"))
         assert dirs.index(str(project / ".crux" / "knowledge")) < \
                dirs.index(str(home / ".crux" / "knowledge"))
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests — lines 149, 153, 157, 189
+# ---------------------------------------------------------------------------
+
+class TestProjectPathsBipProperties:
+    """Test BIP-related properties on ProjectPaths (lines 149, 153, 157)."""
+
+    def test_bip_config_path(self, tmp_path):
+        pp = get_project_paths(str(tmp_path))
+        assert pp.bip_config == os.path.join(str(tmp_path), ".crux", "bip", "config.json")
+
+    def test_bip_state_path(self, tmp_path):
+        pp = get_project_paths(str(tmp_path))
+        assert pp.bip_state == os.path.join(str(tmp_path), ".crux", "bip", "state.json")
+
+    def test_bip_history_path(self, tmp_path):
+        pp = get_project_paths(str(tmp_path))
+        assert pp.bip_history == os.path.join(str(tmp_path), ".crux", "bip", "history.jsonl")
+
+
+class TestGetCruxPython:
+    """Test get_crux_python (line 189 — fallback to sys.executable)."""
+
+    def test_returns_sys_executable_when_no_venv(self, tmp_path, monkeypatch):
+        import sys
+        import scripts.lib.crux_paths as paths_mod
+        # Point get_crux_repo to a directory without .venv
+        monkeypatch.setattr(paths_mod, "get_crux_repo", lambda: str(tmp_path))
+        result = paths_mod.get_crux_python()
+        assert result == sys.executable

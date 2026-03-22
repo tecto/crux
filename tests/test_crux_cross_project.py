@@ -8,6 +8,14 @@ import pytest
 from scripts.lib.crux_init import init_project, init_user
 from scripts.lib.crux_session import SessionState, save_session
 from scripts.lib.crux_cross_project import (
+    _count_corrections,
+    _count_interactions_for_date,
+    _is_safe_path,
+    _load_registry,
+    _read_corrections,
+    _save_registry,
+    _scan_directory_bounded,
+    _MAX_PROJECTS,
     discover_projects,
     register_project,
     unregister_project,
@@ -331,3 +339,388 @@ class TestEdgeCases:
         alpha = next(p for p in result["projects"] if p["project"] == env["projects"]["alpha"])
         # active_mode should be the default or None
         assert isinstance(alpha["active_mode"], (str, type(None)))
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsSafePathEdge:
+    def test_oserror_returns_false(self, monkeypatch):
+        """Line 57-58: OSError/ValueError in _is_safe_path returns False."""
+        monkeypatch.setattr(os.path, "realpath", lambda p: (_ for _ in ()).throw(OSError("bad")))
+        assert _is_safe_path("/some/path", "/home") is False
+
+
+class TestLoadRegistryEdge:
+    def test_registry_too_large(self, env):
+        """Lines 68-69: Registry file too large refuses to load."""
+        import scripts.lib.crux_cross_project as cp
+        registry_path = os.path.join(env["home"], ".crux", "projects.json")
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "w") as f:
+            json.dump({"projects": []}, f)
+        original_getsize = os.path.getsize
+        def mock_getsize(path):
+            if path == registry_path:
+                return cp._MAX_FILE_SIZE + 1
+            return original_getsize(path)
+        import unittest.mock
+        with unittest.mock.patch("os.path.getsize", side_effect=mock_getsize):
+            result = _load_registry(env["home"])
+        assert result == []
+
+    def test_registry_not_dict(self, env):
+        """Lines 75-76: Registry data is not a dict."""
+        registry_path = os.path.join(env["home"], ".crux", "projects.json")
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "w") as f:
+            json.dump([1, 2, 3], f)
+        result = _load_registry(env["home"])
+        assert result == []
+
+    def test_projects_not_list(self, env):
+        """Lines 81-82: projects key is not a list."""
+        registry_path = os.path.join(env["home"], ".crux", "projects.json")
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "w") as f:
+            json.dump({"projects": "not-a-list"}, f)
+        result = _load_registry(env["home"])
+        assert result == []
+
+
+class TestSaveRegistryEdge:
+    def test_filters_unsafe_paths(self, env):
+        """Line 111: Save registry filters unsafe paths and warns."""
+        # Register a valid project first
+        register_project(env["projects"]["alpha"], env["home"])
+        # Manually save with an unsafe path mixed in
+        projects = [env["projects"]["alpha"], "/outside/home/unsafe"]
+        _save_registry(env["home"], projects)
+        # Reload and verify unsafe path was filtered
+        loaded = _load_registry(env["home"])
+        assert "/outside/home/unsafe" not in loaded
+
+    def test_atomic_write_failure_cleans_up(self, env):
+        """Lines 122-127: Exception during atomic write cleans up temp file."""
+        import unittest.mock
+        with unittest.mock.patch("os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                _save_registry(env["home"], [env["projects"]["alpha"]])
+
+    def test_atomic_write_failure_unlink_also_fails(self, env):
+        """Lines 125-126: os.unlink fails too during cleanup (except OSError: pass)."""
+        import unittest.mock
+        original_replace = os.replace
+        original_unlink = os.unlink
+        def mock_replace(src, dst):
+            if dst.endswith("projects.json"):
+                raise OSError("disk full")
+            return original_replace(src, dst)
+        def mock_unlink(path):
+            if path.endswith(".json.tmp"):
+                raise OSError("cannot unlink")
+            return original_unlink(path)
+        with unittest.mock.patch("os.replace", side_effect=mock_replace):
+            with unittest.mock.patch("os.unlink", side_effect=mock_unlink):
+                with pytest.raises(OSError, match="disk full"):
+                    _save_registry(env["home"], [env["projects"]["alpha"]])
+
+
+class TestDiscoverProjectsEdge:
+    def test_max_projects_from_registry(self, env, monkeypatch):
+        """Lines 151-152: Hit max projects limit from registry."""
+        # Create a fake registry with _MAX_PROJECTS entries all pointing to dirs with .crux
+        fake_projects = []
+        for i in range(_MAX_PROJECTS):
+            p = os.path.join(env["home"], "projects", f"proj_{i}")
+            os.makedirs(os.path.join(p, ".crux"), exist_ok=True)
+            fake_projects.append(p)
+        registry_path = os.path.join(env["home"], ".crux", "projects.json")
+        with open(registry_path, "w") as f:
+            json.dump({"projects": fake_projects}, f)
+        result = discover_projects(env["home"])
+        assert len(result) >= _MAX_PROJECTS
+
+    def test_timeout(self, env, monkeypatch):
+        """Lines 158-159: Discovery times out."""
+        import time
+        import scripts.lib.crux_cross_project as cp
+        # Make time.time() return a huge value after first call
+        call_count = [0]
+        def mock_time():
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return 0.0
+            return 999999.0
+        monkeypatch.setattr(time, "time", mock_time)
+        result = discover_projects(env["home"])
+        assert isinstance(result, list)
+
+    def test_scan_root_outside_home(self, env, monkeypatch):
+        """Line 167: Scan root fails _is_safe_path check."""
+        import scripts.lib.crux_cross_project as cp
+        original_is_safe = cp._is_safe_path
+
+        def mock_is_safe(path, home):
+            # Make scan roots fail safety check but let registry paths pass
+            if path.endswith("projects") or path.endswith("personal") or path.endswith("work") or path.endswith("src") or path.endswith("dev") or path == home:
+                return False
+            return original_is_safe(path, home)
+
+        monkeypatch.setattr(cp, "_is_safe_path", mock_is_safe)
+        result = discover_projects(env["home"])
+        assert isinstance(result, list)
+
+    def test_max_projects_from_scan(self, env, monkeypatch):
+        """Lines 174-175: Hit max projects limit during scanning."""
+        import scripts.lib.crux_cross_project as cp
+        monkeypatch.setattr(cp, "_MAX_PROJECTS", 1)
+        # Create two projects in projects dir
+        for name in ["p1", "p2"]:
+            p = os.path.join(env["home"], "projects", name)
+            os.makedirs(os.path.join(p, ".crux"), exist_ok=True)
+        result = discover_projects(env["home"])
+        # _scan_directory_bounded checks len(found) + len(already_found) >= _MAX_PROJECTS
+        # before adding more, so the limit of 1 is strictly enforced.
+        assert len(result) <= 1
+
+    def test_permission_error_during_scan(self, env, monkeypatch):
+        """Lines 177-178: PermissionError during scanning is caught."""
+        import scripts.lib.crux_cross_project as cp
+        def mock_scan(*args, **kwargs):
+            raise PermissionError("no access")
+        monkeypatch.setattr(cp, "_scan_directory_bounded", mock_scan)
+        result = discover_projects(env["home"])
+        assert isinstance(result, list)
+
+
+class TestScanDirectoryBounded:
+    def test_max_depth_zero(self, env):
+        """Line 196: max_depth <= 0 returns empty set."""
+        result = _scan_directory_bounded(env["home"], env["home"], 0, set())
+        assert result == set()
+
+    def test_skips_hidden_dirs(self, env):
+        """Line 202: Skip hidden directories other than .crux."""
+        hidden = os.path.join(env["home"], "projects", ".hidden_project")
+        os.makedirs(os.path.join(hidden, ".crux"), exist_ok=True)
+        result = _scan_directory_bounded(
+            os.path.join(env["home"], "projects"), env["home"], 2, set()
+        )
+        assert hidden not in result
+
+    def test_unsafe_path_in_scan(self, env, monkeypatch):
+        """Line 208: Unsafe path skipped during scan."""
+        import scripts.lib.crux_cross_project as cp
+        original_is_safe = cp._is_safe_path
+
+        def mock_is_safe(path, home):
+            if "alpha" in path:
+                return False
+            return original_is_safe(path, home)
+
+        monkeypatch.setattr(cp, "_is_safe_path", mock_is_safe)
+        result = _scan_directory_bounded(
+            os.path.join(env["home"], "projects"), env["home"], 2, set()
+        )
+        assert all("alpha" not in p for p in result)
+
+    def test_max_projects_in_scan(self, env, monkeypatch):
+        """Line 218: Max projects reached during recursive scan."""
+        import scripts.lib.crux_cross_project as cp
+        monkeypatch.setattr(cp, "_MAX_PROJECTS", 1)
+        result = _scan_directory_bounded(
+            os.path.join(env["home"], "projects"), env["home"], 2, set()
+        )
+        assert len(result) <= 1
+
+    def test_oserror_in_listdir(self, env, monkeypatch):
+        """Lines 225-226: OSError during listdir is caught."""
+        original_listdir = os.listdir
+        def mock_listdir(path):
+            if "projects" in path:
+                raise OSError("I/O error")
+            return original_listdir(path)
+        monkeypatch.setattr(os, "listdir", mock_listdir)
+        result = _scan_directory_bounded(
+            os.path.join(env["home"], "projects"), env["home"], 2, set()
+        )
+        assert result == set()
+
+
+class TestRegisterProjectEdge:
+    def test_register_outside_home(self, tmp_path):
+        """Lines 241-242: Reject project outside home directory."""
+        home = tmp_path / "home"
+        home.mkdir()
+        init_user(home=str(home))
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        result = register_project(str(outside), str(home))
+        assert result["registered"] is False
+        assert result["reason"] == "path_outside_home_directory"
+
+    def test_register_nonexistent_dir(self, env):
+        """Line 250: Register a path that is within home but doesn't exist."""
+        nonexistent = os.path.join(env["home"], "projects", "does_not_exist")
+        result = register_project(nonexistent, env["home"])
+        assert result["registered"] is False
+        assert result["reason"] == "directory_not_found"
+
+    def test_register_max_projects(self, env, monkeypatch):
+        """Line 259: Max projects reached during registration."""
+        import scripts.lib.crux_cross_project as cp
+        monkeypatch.setattr(cp, "_MAX_PROJECTS", 1)
+        register_project(env["projects"]["alpha"], env["home"])
+        result = register_project(env["projects"]["beta"], env["home"])
+        assert result["registered"] is False
+        assert result["reason"] == "max_projects_reached"
+
+
+class TestCountInteractionsEdge:
+    def test_oserror_reading_interactions(self, env):
+        """Lines 297-298: OSError reading interactions file."""
+        proj = env["projects"]["alpha"]
+        log_dir = os.path.join(proj, ".crux", "analytics", "interactions")
+        os.makedirs(log_dir, exist_ok=True)
+        # Create a file that exists but will cause read issues
+        filepath = os.path.join(log_dir, "2026-03-06.jsonl")
+        with open(filepath, "w") as f:
+            f.write("line1\n")
+        # Make the file unreadable by mocking open
+        import unittest.mock
+        import builtins
+        original_open = builtins.open
+        def mock_open(path, *args, **kwargs):
+            if str(path) == filepath:
+                raise OSError("cannot read")
+            return original_open(path, *args, **kwargs)
+        with unittest.mock.patch("builtins.open", side_effect=mock_open):
+            result = _count_interactions_for_date(proj, "2026-03-06")
+        assert result == 0
+
+
+class TestCountCorrectionsEdge:
+    def test_oserror_reading_corrections(self, env):
+        """Lines 312-313: OSError reading corrections file."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        filepath = os.path.join(corr_dir, "corrections.jsonl")
+        with open(filepath, "w") as f:
+            f.write("line1\n")
+        import unittest.mock
+        import builtins
+        original_open = builtins.open
+        def mock_open(path, *args, **kwargs):
+            if str(path) == filepath:
+                raise OSError("cannot read")
+            return original_open(path, *args, **kwargs)
+        with unittest.mock.patch("builtins.open", side_effect=mock_open):
+            result = _count_corrections(proj)
+        assert result == 0
+
+
+class TestReadCorrectionsEdge:
+    def test_blank_lines_skipped(self, env):
+        """Line 342: Blank lines in corrections file are skipped."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            f.write("\n")
+            f.write(json.dumps({"category": "valid"}) + "\n")
+            f.write("\n")
+            f.write("  \n")
+        result = _read_corrections(proj)
+        assert len(result) == 1
+        assert result[0]["category"] == "valid"
+
+    def test_non_dict_entry_skipped(self, env):
+        """Lines 346: Non-dict entries are skipped."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            f.write(json.dumps([1, 2, 3]) + "\n")  # a list, not a dict
+            f.write(json.dumps({"category": "valid"}) + "\n")
+        result = _read_corrections(proj)
+        assert len(result) == 1
+        assert result[0]["category"] == "valid"
+
+    def test_non_dict_entry_strict_raises(self, env):
+        """Lines 347-349: Non-dict entry in strict mode raises ValueError."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            f.write(json.dumps([1, 2, 3]) + "\n")
+        with pytest.raises(ValueError, match="expected dict"):
+            _read_corrections(proj, strict=True)
+
+    def test_json_decode_error_strict_raises(self, env):
+        """Lines 358-361: JSONDecodeError in strict mode raises ValueError."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        with open(os.path.join(corr_dir, "corrections.jsonl"), "w") as f:
+            f.write("not valid json\n")
+        with pytest.raises(ValueError, match="invalid JSON"):
+            _read_corrections(proj, strict=True)
+
+    def test_oserror_reading_corrections_file(self, env):
+        """Lines 360-361: OSError when reading corrections file."""
+        proj = env["projects"]["alpha"]
+        corr_dir = os.path.join(proj, ".crux", "corrections")
+        os.makedirs(corr_dir, exist_ok=True)
+        filepath = os.path.join(corr_dir, "corrections.jsonl")
+        with open(filepath, "w") as f:
+            f.write("data\n")
+        import unittest.mock
+        import builtins
+        original_open = builtins.open
+        def mock_open(path, *args, **kwargs):
+            if str(path) == filepath:
+                raise OSError("cannot read")
+            return original_open(path, *args, **kwargs)
+        with unittest.mock.patch("builtins.open", side_effect=mock_open):
+            result = _read_corrections(proj)
+        assert result == []
+
+
+class TestGenerateUserDigestEdge:
+    def test_atomic_write_failure(self, env, monkeypatch):
+        """Lines 516-521: Exception during digest atomic write cleans up."""
+        for path in env["projects"].values():
+            register_project(path, env["home"])
+        import unittest.mock
+        original_replace = os.replace
+        def mock_replace(src, dst):
+            if dst.endswith(".md"):
+                raise OSError("disk full")
+            return original_replace(src, dst)
+        with unittest.mock.patch("os.replace", side_effect=mock_replace):
+            with pytest.raises(OSError, match="disk full"):
+                generate_user_digest(env["home"])
+
+    def test_atomic_write_failure_unlink_also_fails(self, env, monkeypatch):
+        """Lines 519-520: os.unlink fails too during digest cleanup."""
+        for path in env["projects"].values():
+            register_project(path, env["home"])
+        import unittest.mock
+        original_replace = os.replace
+        original_unlink = os.unlink
+        def mock_replace(src, dst):
+            if dst.endswith(".md"):
+                raise OSError("disk full")
+            return original_replace(src, dst)
+        def mock_unlink(path):
+            if path.endswith(".md.tmp"):
+                raise OSError("cannot unlink")
+            return original_unlink(path)
+        with unittest.mock.patch("os.replace", side_effect=mock_replace):
+            with unittest.mock.patch("os.unlink", side_effect=mock_unlink):
+                with pytest.raises(OSError, match="disk full"):
+                    generate_user_digest(env["home"])

@@ -16,7 +16,7 @@ Baked into the model's system role via Modelfile. Global behavioral rules: numbe
 
 ### Layer 2: Mode Prompts (~120-155 tokens)
 
-15 specialized modes loaded one at a time. Each defines persona, domain-specific rules, and tool access constraints. Total system overhead: ~170-205 tokens = 99.4% of context available for work.
+24 specialized modes loaded one at a time. Each defines persona, domain-specific rules, and tool access constraints. Total system overhead: ~170-205 tokens = 99.4% of context available for work.
 
 ### Layer 3: Plugins and Tools
 
@@ -26,27 +26,31 @@ JavaScript plugins using OpenCode hook system. Custom tools with Zod schemas for
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Mode Layer (15 modes)             │
-│  build-py | build-ex | debug | plan | review | ...  │
+│                    Mode Layer (24 modes)              │
+│  build-py | build-ex | test | debug | plan | ...    │
 ├─────────────────────────────────────────────────────┤
-│                   Plugin Layer (6 plugins)           │
+│                   Plugin Layer (7 plugins)           │
 │  think-router | token-budget | tool-enforcer |      │
 │  session-logger | correction-detector |             │
-│  compaction-hook                                    │
+│  compaction-hook | crux-bridge                      │
 ├─────────────────────────────────────────────────────┤
-│                   Tool Layer (7 tools)               │
+│                   Tool Layer (9 tools)               │
 │  run_script | lookup_knowledge | suggest_handoff |  │
 │  project_context | promote_script | list_scripts |  │
-│  manage_models                                      │
+│  manage_models | marketing_generate |               │
+│  marketing_update_state                             │
 ├─────────────────────────────────────────────────────┤
-│             Python Infrastructure Scripts            │
+│          MCP Server (37 tools via FastMCP)           │
+│  crux_mcp_server.py | crux_mcp_handlers.py         │
+├─────────────────────────────────────────────────────┤
+│        Python Infrastructure (38 modules)            │
 │  preflight_validator | extract_corrections |        │
-│  update_project_context | generate_digest |         │
-│  promote_knowledge | model_registry_update |        │
-│  model_auto_evaluate | audit_modes                  │
+│  crux_session | crux_hooks | crux_sync |            │
+│  crux_background_processor | crux_cross_project |   │
+│  crux_security_audit | crux_tdd_gate | ...          │
 ├─────────────────────────────────────────────────────┤
 │                   Knowledge Layer                    │
-│  Project (.opencode/knowledge/) |                   │
+│  Project (.crux/knowledge/) |                   │
 │  User (~/.config/opencode/knowledge/) |             │
 │  Public (this repo/knowledge/)                      │
 └─────────────────────────────────────────────────────┘
@@ -111,8 +115,8 @@ Session logger creates checkpoints every 5 interactions. On crash, the next sess
 
 | Scope | Location | Purpose |
 |-------|----------|---------|
-| Project | `.opencode/` | Project-specific config, scripts, knowledge |
-| User | `~/.config/opencode/` | Cross-project config, promoted knowledge |
+| Project | `.crux/` | Project-specific config, scripts, knowledge |
+| User | `~/.crux/` | Cross-project config, promoted knowledge |
 | Public | This repository | Shared modes, templates, community knowledge |
 
 Artifacts promote upward as they prove value: session scripts → library, project knowledge → user knowledge.

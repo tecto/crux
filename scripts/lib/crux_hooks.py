@@ -539,8 +539,8 @@ def _increment_bip_counter(project_dir: str, field_name: str, amount: int = 1) -
         if os.path.isdir(bip_dir):
             from scripts.lib.crux_bip import increment_counter
             increment_counter(bip_dir, field_name, amount)
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("BIP counter increment failed: %s", e)
 
 
 def _detect_bip_event(tool_name: str, tool_input: dict, tool_output: str) -> str | None:

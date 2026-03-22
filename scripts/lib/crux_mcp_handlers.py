@@ -24,6 +24,8 @@ KNOWN_MODES = frozenset([
     "docs", "design", "security", "build-in-public", "default"
 ])
 
+from scripts.lib.crux_security import secure_write_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -489,8 +491,12 @@ def handle_log_correction(
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    with open(corrections_file, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    try:
+        with open(corrections_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        logger.warning("Could not write correction log %s: %s", corrections_file, e)
+        return {"logged": False, "error": str(e)}
 
     return {"logged": True}
 
@@ -935,8 +941,7 @@ def handle_bip_approve(
     drafts_dir = os.path.join(bip_dir, "drafts")
     os.makedirs(drafts_dir, exist_ok=True)
     draft_path = os.path.join(drafts_dir, draft_filename)
-    with open(draft_path, "w") as f:
-        f.write(draft_text)
+    secure_write_file(draft_path, draft_text)
 
     # Try to queue to Typefully
     queued = False

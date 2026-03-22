@@ -31,7 +31,7 @@ The `session-logger.js` plugin captures 100% of interactions:
 ## Level 4: Knowledge Promotion
 
 `promote_knowledge.py` promotes entries through three tiers:
-- **Project** (`.opencode/knowledge/`): Project-specific patterns
+- **Project** (`.crux/knowledge/`): Project-specific patterns
 - **User** (`~/.config/opencode/knowledge/`): Cross-project patterns
 - **Public** (this repo): Community-shared patterns
 

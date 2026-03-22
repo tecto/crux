@@ -4,13 +4,13 @@ Complete interactive installer for Crux — a self-improving AI operating system
 
 ## Overview
 
-This is a 3,065-line comprehensive setup script that transforms a Mac into a fully-configured Crux system with:
+This is a 1,971-line comprehensive setup script that transforms a Mac into a fully-configured Crux system with:
 
 - Local LLM infrastructure (Ollama + optimized models)
-- 15 specialized AI modes for different tasks
-- 11 custom commands for workflow optimization
-- 7 custom tools for system integration
-- 5 plugins for automatic enhancements
+- 24 specialized AI modes for different tasks
+- 12 custom commands for workflow optimization
+- 9 custom tools for system integration
+- 7 plugins for automatic enhancements
 - 2 skills for session logging and script building
 - Complete knowledge base infrastructure
 - Analytics and session tracking
@@ -30,22 +30,31 @@ This is a 3,065-line comprehensive setup script that transforms a Mac into a ful
 - Creates two Modelfile variants: crux-think (reasoning) and crux-chat (execution)
 - Model registry with capability tracking
 
-### 15 Specialized Modes
+### 24 Specialized Modes
 1. **build-py** - Python development (security-first)
 2. **build-ex** - Elixir/Phoenix development
-3. **plan** - Software architecture
-4. **infra-architect** - Infrastructure & deployment
-5. **review** - Code review (security priority)
-6. **debug** - Root cause analysis
-7. **explain** - Teaching & mentoring
-8. **analyst** - Data analysis
-9. **writer** - Professional writing
-10. **psych** - Psychological reflection
-11. **legal** - Legal research
-12. **strategist** - First principles thinking
-13. **ai-infra** - LLM infrastructure
-14. **mac** - macOS systems
-15. **docker** - Containers & infrastructure
+3. **test** - Test-first development
+4. **plan** - Software architecture
+5. **infra-architect** - Infrastructure & deployment
+6. **review** - Code review (security priority)
+7. **security** - Adversarial vulnerability analysis
+8. **debug** - Root cause analysis
+9. **explain** - Teaching & mentoring
+10. **analyst** - Data analysis
+11. **writer** - Professional writing
+12. **marketing** - Marketing strategy/copywriting
+13. **build-in-public** - Shipping update content
+14. **psych** - Psychological reflection
+15. **legal** - Legal research
+16. **strategist** - First principles thinking
+17. **ai-infra** - LLM infrastructure
+18. **mac** - macOS systems
+19. **docker** - Containers & infrastructure
+20. **design-ui** - UI component implementation
+21. **design-system** - Design system creation
+22. **design-review** - Design quality review
+23. **design-responsive** - Responsive layout
+24. **design-accessibility** - WCAG accessibility
 
 Each mode includes complete prompts with core rules, methodologies, safety guidelines, and response formats.
 
@@ -61,11 +70,11 @@ Each mode includes complete prompts with core rules, methodologies, safety guide
 - Git integration rules
 - Session logging & resume mechanisms
 
-**11 Custom Commands** - /promote, /scripts, /archive, /log, /init-project, /stats, /digest, /propose-mode, /review-knowledge, /review-community, /configure-api
+**12 Custom Commands** - /promote, /scripts, /archive, /log, /init-project, /stats, /digest, /propose-mode, /review-knowledge, /review-community, /configure-api, /restore
 
-**7 Custom Tools** - JavaScript implementations for script promotion, listing, execution, context retrieval, knowledge lookup, handoff suggestion, and model management
+**9 Custom Tools** - JavaScript implementations for script promotion, listing, execution, context retrieval, knowledge lookup, handoff suggestion, model management, marketing generation, and marketing state
 
-**5 Plugins** - Session logging, think-router, correction detection, session compaction, token budget enforcement
+**7 Plugins** - Session logging, think-router, correction detection, session compaction, token budget enforcement, tool enforcer, and crux-bridge
 
 **2 Skills** - Session logging capability and script building workflow
 
@@ -113,10 +122,10 @@ Tier 0 (LSP) → Tier 1 (Custom Tools) → Tier 2 (MCP) → Tier 3 (Library Scri
 ~/.config/opencode/
 ├── opencode.json          # Main configuration
 ├── AGENTS.md             # Framework documentation
-├── modes/                # 15 mode definitions
-├── commands/             # 11 custom commands
-├── tools/                # 7 JavaScript tools
-├── plugins/              # 5 plugins with full implementations
+├── modes/                # 24 mode definitions
+├── commands/             # 12 custom commands
+├── tools/                # 9 JavaScript tools
+├── plugins/              # 7 plugins with full implementations
 ├── skills/               # 2 skill definitions
 ├── knowledge/            # Per-mode knowledge base
 ├── models/               # Model registry
@@ -132,21 +141,21 @@ opencode /init-project myapp # Initialize project
 opencode --mode build-py     # Start using
 ```
 
-## Script Structure (3,065 lines)
+## Script Structure (1,971 lines)
 
 - Helper functions with colored output
 - State tracking for idempotency
-- 18 sequential setup steps
+- 20 sequential setup steps
 - Hardware detection with memory math
 - Ollama installation and verification
 - Intelligent model selection
 - Modelfile creation with system prompts
 - Environment configuration
-- All 15 modes with complete prompts
+- All 24 modes with complete prompts
 - AGENTS.md framework documentation
-- 11 custom commands with descriptions
-- 7 custom tools with Zod schemas
-- 5 plugins (3 full implementations, 2 stubs)
+- 12 custom commands with descriptions
+- 9 custom tools with Zod schemas
+- 7 plugins with full implementations
 - 2 skills with capability descriptions
 - Knowledge base structure
 - Model registry setup

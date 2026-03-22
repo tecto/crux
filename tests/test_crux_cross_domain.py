@@ -212,3 +212,125 @@ class TestCrossDomainSync:
         assert result["test_patterns_created"] == 0
         assert result["security_patterns_created"] == 0
         assert result["design_patterns_created"] == 0
+
+    def test_security_finding_conversion_error(self, tmp_path):
+        """Lines 225-228: exception handling for malformed security findings."""
+        from unittest.mock import patch
+        store = KnowledgeStore(str(tmp_path / "kb"))
+        # A valid SecurityFinding but mock the converter to raise
+        finding = SecurityFinding(
+            finding_id="sec-bad", category="auth", severity="high",
+            title="Bad", description="d", file_path="f",
+            line_range=[], remediation="r",
+        )
+        with patch(
+            "scripts.lib.crux_cross_domain.security_to_test_pattern",
+            side_effect=Exception("conversion failed"),
+        ):
+            result = cross_domain_sync(store=store, security_findings=[finding])
+        assert result["test_patterns_created"] == 0
+        assert len(result["errors"]) == 1
+        assert "security finding" in result["errors"][0].lower()
+
+    def test_design_finding_conversion_error(self, tmp_path):
+        """Lines 235-238: exception handling for malformed design findings."""
+        from unittest.mock import patch
+        store = KnowledgeStore(str(tmp_path / "kb"))
+        finding = ValidationFinding(
+            finding_id="dv-bad", category="wcag", severity="critical",
+            title="Bad", description="d", element="e", remediation="r",
+        )
+        with patch(
+            "scripts.lib.crux_cross_domain.design_to_security_pattern",
+            side_effect=Exception("design conversion failed"),
+        ):
+            result = cross_domain_sync(store=store, design_findings=[finding])
+        assert result["security_patterns_created"] == 0
+        assert len(result["errors"]) == 1
+        assert "design finding" in result["errors"][0].lower()
+
+    def test_non_dict_test_design_update(self, tmp_path):
+        """Lines 245-246: non-dict item in test_design_updates."""
+        store = KnowledgeStore(str(tmp_path / "kb"))
+        result = cross_domain_sync(
+            store=store,
+            test_design_updates=["not a dict", 42],
+        )
+        assert result["design_patterns_created"] == 0
+
+    def test_missing_fields_test_design_update(self, tmp_path):
+        """Lines 251-252: dict missing required fields."""
+        store = KnowledgeStore(str(tmp_path / "kb"))
+        result = cross_domain_sync(
+            store=store,
+            test_design_updates=[{"component": "Button"}],  # missing property_name, preferred_value, reason
+        )
+        assert result["design_patterns_created"] == 0
+
+    def test_test_insight_conversion_error(self, tmp_path):
+        """Lines 262-265: exception in testing_to_design_pattern."""
+        from unittest.mock import patch
+        store = KnowledgeStore(str(tmp_path / "kb"))
+        update = {
+            "component": "Button",
+            "property_name": "size",
+            "preferred_value": "48px",
+            "reason": "too small",
+        }
+        with patch(
+            "scripts.lib.crux_cross_domain.testing_to_design_pattern",
+            side_effect=Exception("insight conversion failed"),
+        ):
+            result = cross_domain_sync(store=store, test_design_updates=[update])
+        assert result["design_patterns_created"] == 0
+        assert len(result["errors"]) == 1
+        assert "test insight" in result["errors"][0].lower()
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers (lines 42-75)
+# ---------------------------------------------------------------------------
+
+class TestValidationHelpers:
+    """Cover _truncate_field, _validate_string, _validate_list edge cases."""
+
+    def test_truncate_field_exceeds_max(self):
+        """Lines 45-49: truncation branch."""
+        from scripts.lib.crux_cross_domain import _truncate_field
+        result = _truncate_field("a" * 100, 10, "test_field")
+        assert len(result) <= 30  # 10 chars + "...[truncated]"
+        assert result.endswith("...[truncated]")
+
+    def test_truncate_field_within_max(self):
+        from scripts.lib.crux_cross_domain import _truncate_field
+        result = _truncate_field("short", 100, "test_field")
+        assert result == "short"
+
+    def test_validate_string_none(self):
+        """Line 56: None returns empty string."""
+        from scripts.lib.crux_cross_domain import _validate_string
+        assert _validate_string(None, "f", 100) == ""
+
+    def test_validate_string_non_string(self):
+        """Line 58: non-string coerced to string."""
+        from scripts.lib.crux_cross_domain import _validate_string
+        result = _validate_string(42, "f", 100)
+        assert result == "42"
+
+    def test_validate_list_none(self):
+        """Line 65: None returns empty list."""
+        from scripts.lib.crux_cross_domain import _validate_list
+        assert _validate_list(None, "f") == []
+
+    def test_validate_list_non_list(self):
+        """Lines 67-68: non-list returns empty list."""
+        from scripts.lib.crux_cross_domain import _validate_list
+        assert _validate_list("not a list", "f") == []
+
+    def test_validate_list_too_long(self):
+        """Lines 70-74: list exceeding max_items gets truncated."""
+        from scripts.lib.crux_cross_domain import _validate_list
+        big_list = list(range(200))
+        result = _validate_list(big_list, "f", max_items=5)
+        assert len(result) == 5
+        assert result == [0, 1, 2, 3, 4]

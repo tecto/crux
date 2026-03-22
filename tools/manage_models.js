@@ -66,6 +66,10 @@ async function switchModel(registry, registryPath, model) {
   return { switched: model, active: model };
 }
 
+// Model pulling is handled by the MCP server via crux_ollama.py, which
+// provides the full pull_model implementation using Ollama's REST API.
+// This JS bridge is retained for non-MCP environments where tools are
+// loaded directly by OpenCode's plugin system.
 function pullModelViaOllama(modelName) {
   return new Promise((resolve) => {
     const code = `

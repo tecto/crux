@@ -6,6 +6,7 @@ The MCP decorators are thin wrappers; the logic lives in testable functions.
 
 import json
 import os
+import unittest.mock
 from pathlib import Path
 
 import pytest
@@ -406,6 +407,21 @@ class TestLogCorrection:
         )
         lines = corrections_file.read_text().strip().split("\n")
         assert len(lines) == 2
+
+    def test_log_correction_oserror(self, env):
+        corrections_dir = Path(env["project"]) / ".crux" / "corrections"
+        corrections_dir.mkdir(parents=True, exist_ok=True)
+        corrections_file = corrections_dir / "corrections.jsonl"
+        with unittest.mock.patch("builtins.open", side_effect=OSError("disk full")):
+            result = handle_log_correction(
+                original="fail",
+                corrected="fix",
+                category="code-pattern",
+                mode="build-py",
+                project_dir=env["project"],
+            )
+        assert result["logged"] is False
+        assert "disk full" in result["error"]
 
 
 # ---------------------------------------------------------------------------

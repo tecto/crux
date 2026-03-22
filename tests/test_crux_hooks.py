@@ -1093,3 +1093,235 @@ class TestHandleStopTddCheck:
             home=env["home"],
         )
         assert result["tdd_compliant"] is True
+
+
+# ---------------------------------------------------------------------------
+# PLAN-166 security validation functions
+# ---------------------------------------------------------------------------
+
+class TestSecurityValidation:
+    """Tests for PLAN-166 security validation helpers."""
+
+    def test_is_safe_name_rejects_empty(self):
+        from scripts.lib.crux_hooks import _is_safe_name
+        assert _is_safe_name("") is False
+
+    def test_is_safe_name_rejects_too_long(self):
+        from scripts.lib.crux_hooks import _is_safe_name
+        assert _is_safe_name("a" * 129) is False
+
+    def test_is_safe_name_rejects_dotdot(self):
+        from scripts.lib.crux_hooks import _is_safe_name
+        assert _is_safe_name("foo..bar") is False
+
+    def test_is_safe_name_rejects_slash(self):
+        from scripts.lib.crux_hooks import _is_safe_name
+        assert _is_safe_name("foo/bar") is False
+
+    def test_is_safe_name_rejects_backslash(self):
+        from scripts.lib.crux_hooks import _is_safe_name
+        assert _is_safe_name("foo\\bar") is False
+
+    def test_is_safe_path_returns_false_on_value_error(self, tmp_path):
+        from scripts.lib.crux_hooks import _is_safe_path
+        # A path with null byte triggers ValueError/OSError
+        assert _is_safe_path("/foo/\x00bar", str(tmp_path)) is False
+
+    def test_truncate_for_safety_truncates_long_string(self):
+        from scripts.lib.crux_hooks import _truncate_for_safety
+        result = _truncate_for_safety("x" * 200, 100)
+        assert result.endswith("...[TRUNCATED]")
+        assert len(result) < 200
+
+    def test_truncate_for_safety_returns_short_string_as_is(self):
+        from scripts.lib.crux_hooks import _truncate_for_safety
+        result = _truncate_for_safety("short", 100)
+        assert result == "short"
+
+    def test_sanitize_dict_max_depth(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"a": "b"}, depth=11)
+        assert "[TRUNCATED]" in result
+
+    def test_sanitize_dict_redacts_sensitive_key(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"api_key": "sk-12345"})
+        assert result["api_key"] == "[REDACTED]"
+
+    def test_sanitize_dict_handles_list_with_dicts(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"items": [{"password": "secret"}, "plain", 42]})
+        assert result["items"][0]["password"] == "[REDACTED]"
+        assert result["items"][2] == 42
+
+    def test_sanitize_dict_redacts_string_values_with_secrets(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"note": "key is sk-ABCDEFGHIJKLMNOPQRSTUVw"})
+        assert "[REDACTED]" in result["note"]
+
+    def test_sanitize_dict_passes_through_non_sensitive_non_string(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"count": 42})
+        assert result["count"] == 42
+
+    def test_sanitize_dict_recurses_into_nested_dicts(self):
+        from scripts.lib.crux_hooks import _sanitize_dict
+        result = _sanitize_dict({"outer": {"password": "secret123"}})
+        assert result["outer"]["password"] == "[REDACTED]"
+
+    def test_sanitize_prompt_truncates_long_prompt(self):
+        from scripts.lib.crux_hooks import _sanitize_prompt
+        long_prompt = "x" * (100 * 1024 + 100)
+        result = _sanitize_prompt(long_prompt)
+        assert "[TRUNCATED]" in result
+
+
+# ---------------------------------------------------------------------------
+# PLAN-166 edge cases in hook handlers
+# ---------------------------------------------------------------------------
+
+class TestPostToolUseSecurityEdgeCases:
+    """Tests for PLAN-166 edge cases in handle_post_tool_use."""
+
+    def test_invalid_tool_name_type(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        result = handle_post_tool_use(
+            event_data={"tool_name": 12345, "tool_input": {}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "error"
+        assert "tool_name" in result["message"]
+
+    def test_tool_name_too_long(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        result = handle_post_tool_use(
+            event_data={"tool_name": "x" * 300, "tool_input": {}},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "error"
+
+    def test_non_dict_tool_input_treated_as_empty(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        result = handle_post_tool_use(
+            event_data={"tool_name": "Read", "tool_input": "not a dict"},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+
+    def test_file_path_too_long_rejected(self, env):
+        from scripts.lib.crux_hooks import handle_post_tool_use
+        result = handle_post_tool_use(
+            event_data={
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/" + "x" * 2000},
+            },
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+        assert "file_tracked" not in result
+
+
+class TestSessionStartUnsafeMode:
+    """Test session start with unsafe mode name (line 445)."""
+
+    def test_unsafe_mode_name_is_rejected(self, env):
+        from scripts.lib.crux_hooks import handle_session_start
+        from scripts.lib.crux_session import load_session, save_session
+
+        state = load_session(env["crux_dir"])
+        state.active_mode = "../etc/passwd"
+        save_session(state, project_crux_dir=env["crux_dir"])
+
+        result = handle_session_start(
+            event_data={"source": "startup"},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+        # The unsafe mode should NOT have loaded a mode file
+        assert "Active Mode:" not in result.get("context", "")
+
+
+class TestUserPromptSecurityEdgeCases:
+    """Tests for PLAN-166 edge cases in handle_user_prompt."""
+
+    def test_non_string_prompt_returns_error(self, env):
+        from scripts.lib.crux_hooks import handle_user_prompt
+        result = handle_user_prompt(
+            event_data={"prompt": 12345},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "error"
+        assert "string" in result["message"]
+
+    def test_oversized_prompt_is_truncated(self, env):
+        from scripts.lib.crux_hooks import handle_user_prompt
+        result = handle_user_prompt(
+            event_data={"prompt": "x" * (100 * 1024 + 100)},
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "ok"
+
+
+class TestRunHookSecurityValidation:
+    """Tests for PLAN-166 edge cases in run_hook."""
+
+    def test_json_array_returns_error(self, env):
+        from scripts.lib.crux_hooks import run_hook
+        result = run_hook(
+            event_json='[1, 2, 3]',
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "error"
+        assert "object" in result["message"]
+
+    def test_non_string_event_name_returns_error(self, env):
+        from scripts.lib.crux_hooks import run_hook
+        result = run_hook(
+            event_json=json.dumps({"hook_event_name": 42}),
+            project_dir=env["project"],
+            home=env["home"],
+        )
+        assert result["status"] == "error"
+        assert "string" in result["message"]
+
+
+class TestBipCounterAndProcessors:
+    """Tests for _increment_bip_counter and _try_background_processors edge cases."""
+
+    def test_increment_bip_counter_swallows_exception(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import _increment_bip_counter
+        # Create bip dir so the code path enters the try block
+        bip_dir = os.path.join(env["project"], ".crux", "bip")
+        os.makedirs(bip_dir, exist_ok=True)
+        # Monkeypatch increment_counter to raise
+        import scripts.lib.crux_bip as bip_mod
+        monkeypatch.setattr(bip_mod, "increment_counter", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+        # Should not raise
+        _increment_bip_counter(env["project"], "interactions_since_last_post", 1)
+
+    def test_try_background_processors_logs_exception(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import _try_background_processors
+        import scripts.lib.crux_background_processor as bp_mod
+        monkeypatch.setattr(bp_mod, "should_process", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+        result = _try_background_processors(env["project"], env["home"])
+        assert result is None
+
+    def test_try_background_processors_handles_import_error(self, env, monkeypatch):
+        from scripts.lib.crux_hooks import _try_background_processors
+        import sys
+        # Temporarily remove the module from sys.modules so import fails
+        saved = sys.modules.pop("scripts.lib.crux_background_processor", None)
+        monkeypatch.setitem(sys.modules, "scripts.lib.crux_background_processor", None)
+        result = _try_background_processors(env["project"], env["home"])
+        assert result is None
+        # Restore
+        if saved is not None:
+            sys.modules["scripts.lib.crux_background_processor"] = saved

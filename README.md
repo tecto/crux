@@ -28,7 +28,7 @@ This principle extends to every layer of the system:
 
 **The tool hierarchy** ensures the AI always uses the most reliable tool available. Custom tools (schema-validated, atomic operations) are preferred over MCP servers (structured external integrations), which are preferred over existing scripts (proven, reusable), which are preferred over new scripts (templated, audited), which are preferred over raw shell commands (last resort, logged). The hierarchy is enforced by plugin hooks — the AI can't skip a tier because the infrastructure checks before every tool invocation.
 
-**The safety pipeline** gates every script through up to seven stages before execution: deterministic pre-flight validation, TDD/BDD enforcement, recursive security audit, adversarial AI audit by a separate model, second-opinion AI audit for high-risk scripts, human approval, and dry-run execution. The number of gates scales with risk — a read-only script passes through one gate in milliseconds; a production deployment script passes through all seven.
+**The safety pipeline** gates every script through up to five gates before execution: deterministic pre-flight validation, adversarial AI audit by a separate 8B model, second-opinion AI audit by the 32B model for high-risk scripts, human approval, and dry-run execution. The number of gates scales with risk — a read-only script passes through one gate in milliseconds; a production deployment script passes through all five.
 
 **Continuous learning** is the engine that makes everything else improve over time. Every interaction is logged. Corrections are detected automatically and structured into knowledge entries. Tool usage patterns are analyzed to identify promotion candidates. Mode effectiveness is tracked across sessions. The system generates daily digests with concrete, actionable recommendations — which modes need prompt revisions, which bash patterns should become tools, which knowledge gaps are causing repeat corrections.
 
@@ -51,11 +51,11 @@ Crux generates tool-specific configuration from `.crux/` data:
 - **OpenCode**: Symlinks to `~/.config/opencode/` for modes, agents, and knowledge
 - **Cursor**: `.cursor/rules/` with plain markdown rules, `.cursor/mcp.json` for MCP registration
 - **Windsurf**: `.windsurf/rules/` with plain markdown rules, `.windsurf/mcp.json` for MCP registration
-- **MCP Server**: 37-tool FastMCP server accessible from any MCP-compatible client
+- **MCP Server**: 37-tool FastMCP server (`scripts/lib/crux_mcp_server.py`) accessible from any MCP-compatible client
 
 ## The MCP Server
 
-Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server provides 37 tools:
+Crux exposes its capabilities via the Model Context Protocol, making them available to any MCP-compatible tool. The server (`scripts/lib/crux_mcp_server.py`) provides 37 tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -89,7 +89,7 @@ Crux exposes its capabilities via the Model Context Protocol, making them availa
 
 **It is not tied to any specific agentic tool.** Current adapters support OpenCode, Claude Code, Cursor, and Windsurf, with the MCP server accessible from any MCP-compatible client. Modes, knowledge, scripts, and learning data are tool-independent files on disk.
 
-**It is not just for code.** Twenty-three built-in modes span coding, architecture, debugging, testing, security analysis, design (UI, systems, accessibility, responsive), data analysis, writing, psychological reflection, legal research, business strategy, AI infrastructure, and systems administration.
+**It is not just for code.** Twenty-four built-in modes span coding, architecture, debugging, testing, security analysis, design (UI, systems, accessibility, responsive), data analysis, writing, psychological reflection, legal research, business strategy, AI infrastructure, and systems administration.
 
 **It is not a prompt library.** Prompts are one component. The value is in the infrastructure: the safety pipeline, the continuous learning system, the tool hierarchy enforcement, the TDD gate, the recursive security audits, the cross-session knowledge accumulation. These are code, not prompts.
 
@@ -160,8 +160,8 @@ crux/
 ├── bin/crux                    # CLI wrapper (setup, update, doctor, adopt)
 ├── .crux/                      # Project-level Crux data (sessions, analytics, knowledge)
 ├── scripts/
-│   └── lib/                    # 32 Python modules (stdlib + mcp dependency)
-│       ├── crux_mcp_server.py  # 34-tool FastMCP server
+│   └── lib/                    # 38 Python modules (stdlib + mcp dependency)
+│       ├── crux_mcp_server.py  # 37-tool FastMCP server
 │       ├── crux_mcp_handlers.py# Pure handler functions (no MCP deps)
 │       ├── crux_hooks.py       # Claude Code hook handlers
 │       ├── crux_session.py     # Session state management
@@ -188,14 +188,15 @@ crux/
 │       ├── preflight_validator.py    # Gate 1: script validation
 │       ├── audit_modes.py           # Mode prompt quality auditing
 │       └── ...
-├── modes/                      # 23 mode definitions (MD with YAML frontmatter)
-├── plugins/                    # 6 OpenCode plugins (JS)
+├── modes/                      # 24 mode definitions (MD with YAML frontmatter)
+├── plugins/                    # 7 OpenCode plugins (JS)
 │   ├── session-logger.js       # JSONL logging, crash recovery
 │   ├── think-router.js         # /think routing per mode
 │   ├── correction-detector.js  # Real-time correction capture
 │   ├── compaction-hook.js      # Context compaction with logging
 │   ├── token-budget.js         # Per-mode token tracking
-│   └── tool-enforcer.js        # Mode-based tool access control
+│   ├── tool-enforcer.js        # Mode-based tool access control
+│   └── crux-bridge.js          # CruxCLI bridge (symlink)
 ├── tools/                      # 9 custom tools (JS)
 │   ├── run_script.js           # Safety pipeline execution
 │   ├── promote_script.js       # Script promotion (session → lib)
@@ -206,11 +207,11 @@ crux/
 │   ├── manage_models.js        # Model registry CRUD
 │   ├── marketing_generate.js   # Content pipeline
 │   └── marketing_update_state.js
-├── commands/                   # Custom command definitions (MD)
+├── commands/                   # 12 custom command definitions (MD)
 ├── templates/                  # AGENTS.md, PROJECT.md, opencode.json
 ├── knowledge/                  # Knowledge base template
 ├── docs/                       # Architecture, modes, safety, learning docs
-├── tests/                      # 1480+ tests (pytest + node:test + bats)
+├── tests/                      # 1561+ tests (pytest + node:test + bats)
 ├── CONTRIBUTING.md
 ├── LICENSE                     # MIT
 └── README.md
@@ -261,20 +262,18 @@ crux/
 | Gate | Stage | Implementation |
 |------|-------|----------------|
 | 1 | Pre-flight validation | `preflight_validator.py` — structural checks, risk classification |
-| 2 | TDD/BDD enforcement | `crux_tdd_gate.py` — red/green phase tracking, coverage |
-| 3 | Recursive security audit | `crux_security_audit.py` — 7 categories, convergence detection |
-| 4 | 8B adversarial audit | `crux_llm_audit.py` + `run_script.js` — separate model reviews via Ollama |
-| 5 | 32B second opinion | `crux_llm_audit.py` + `run_script.js` — high-risk only, larger model review |
-| 6 | Human approval | `run_script.js` — required for high-risk scripts |
-| 7 | DRY_RUN execution | `run_script.js` — safe preview for medium+ risk |
+| 2 | 8B adversarial audit | `crux_llm_audit.py` + `run_script.js` — separate model reviews via Ollama |
+| 3 | 32B second opinion | `crux_llm_audit.py` + `run_script.js` — high-risk only, larger model review |
+| 4 | Human approval | `run_script.js` — required for high-risk scripts |
+| 5 | DRY_RUN execution | `run_script.js` — safe preview for medium+ risk |
 
 ## Test Suite
 
-1480+ tests across three frameworks:
+1561+ tests across three frameworks:
 
-- **Python (pytest)**: 1070+ tests across 30+ test files covering all Python modules with 100% coverage enforced
-- **JavaScript (node:test)**: 199 tests covering plugins and tools
-- **Bash (bats)**: 213 tests covering setup, CLI, and repo structure
+- **Python (pytest)**: 1561 tests across 41 test files covering all Python modules with 100% coverage enforced (`--cov=scripts/lib --cov-fail-under=100`)
+- **JavaScript (node:test)**: 7 test files covering plugins and tools
+- **Bash (bats)**: 8 test files covering setup, CLI, and repo structure
 
 ## Contributing
 

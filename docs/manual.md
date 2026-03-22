@@ -71,37 +71,55 @@ Two methods exist, and both are instant:
 
 Mode switching is free—it doesn't cost tokens or time. You can switch back and forth as many times per session as you need. Crux preserves context across mode switches, so information you've gathered in one mode is available in another.
 
-### The 15 Modes Reference
+### The 24 Modes Reference
 
-**plan** — High-level architecture and design. Use this when you're deciding "what should we build?" before writing any code. Crux explores solution spaces broadly, considers trade-offs, and documents assumptions. Think mode: generates many alternatives; then critique mode: narrows them down.
+**plan** — High-level architecture and design. Use this when you're deciding "what should we build?" before writing any code. Crux explores solution spaces broadly, considers trade-offs, and documents assumptions.
 
-**debug** — Dig into runtime behavior, failures, and misbehavior. Use when something is broken and you need to understand why. Crux has access to deeper instrumentation, can suggest targeted test cases, and focuses on reproducing issues. High sampling; encourages exploration of edge cases.
+**debug** — Dig into runtime behavior, failures, and misbehavior. Use when something is broken and you need to understand why. Crux has access to deeper instrumentation, can suggest targeted test cases, and focuses on reproducing issues.
 
-**build-py** — Python-focused development. Optimized for writing, testing, and iterating on Python code. Crux understands Python-specific idioms, testing frameworks (pytest, unittest), and common libraries. Scripts audited slightly faster because Python is statically analyzable.
+**build-py** — Python-focused development. Optimized for writing, testing, and iterating on Python code. Crux understands Python-specific idioms, testing frameworks (pytest, unittest), and common libraries.
 
-**build-ts** — TypeScript/JavaScript-focused development. Optimized for writing frontend and Node.js code. Crux understands React patterns, async flows, type safety, and common npm packages.
+**build-ex** — Elixir/Phoenix/Ash development. Optimized for writing Elixir applications with the Phoenix framework and Ash resource library.
 
-**build-go** — Go development. Optimized for writing concurrent, networked Go code. Crux understands goroutines, interfaces, and the Go standard library deeply.
+**test** — Test-first development. Use when expanding test coverage or designing test architecture. Crux understands coverage gaps and suggests high-ROI test cases.
 
-**build-rust** — Rust development. Optimized for systems programming and memory-safety work. Crux understands ownership, lifetimes, and common crates. High safety constraints because Rust mistakes are often low-level.
-
-**infra-architect** — Infrastructure and deployment. Use when designing or modifying cloud infrastructure, Kubernetes configs, Terraform, Docker setups. Crux can modify system-level configuration with tighter approval gates.
-
-**optimize** — Performance and efficiency work. Use when you're trying to make things faster, smaller, or more resource-efficient. Crux focuses on measurements and benchmarks, proposes targeted changes, and validates improvements.
-
-**security** — Security-focused work. Use when hardening systems, fixing vulnerabilities, or implementing auth/crypto. Crux applies stricter safety gates and prefers well-known patterns over novel solutions.
-
-**docs** — Documentation and knowledge work. Use when writing READMEs, guides, API docs, or training materials. Crux prioritizes clarity for your audience, structures information logically, and suggests examples.
-
-**test** — Testing strategy and test writing. Use when expanding test coverage or designing test architecture. Crux understands coverage gaps and suggests high-ROI test cases.
-
-**refactor** — Code cleanup and simplification. Use when you want to improve structure without changing behavior. Crux focuses on reducing complexity, improving readability, and catching accidental behavior changes.
+**infra-architect** — Infrastructure and deployment. Use when designing or modifying cloud infrastructure, Kubernetes configs, Terraform, Docker setups.
 
 **review** — Code review and quality gates. Use to review code before merging, analyze pull requests, or spot issues. Crux acts like a thorough code reviewer, looking for logic errors, anti-patterns, and edge cases.
 
-**prototype** — Rapid experimentation and spike work. Use when you're exploring an idea quickly. Crux favors speed and iteration over robustness. Safety constraints loosen slightly because you're in a sandbox.
+**security** — Adversarial vulnerability analysis. Use when hardening systems, fixing vulnerabilities, or implementing auth/crypto. Crux applies stricter safety gates and prefers well-known patterns over novel solutions.
 
-**research** — Investigation and exploration. Use when learning new libraries, tools, or approaches. Crux gathers information, synthesizes it, and explains trade-offs without immediately pushing for implementation.
+**explain** — Teaching and mentoring. Use when you need concepts explained clearly or want to understand how something works.
+
+**analyst** — Data analysis. Use when working with data, building queries, or analyzing results.
+
+**writer** — Professional writing. Use when writing documentation, guides, API docs, or other professional content.
+
+**marketing** — Marketing strategy and copywriting. Use when crafting positioning, messaging, or marketing content.
+
+**build-in-public** — Shipping update content. Use when creating build-in-public posts, changelogs, or shipping updates.
+
+**psych** — ACT/Attachment/Shadow/Somatic therapy-informed reflection. Use for psychological self-reflection and personal development work.
+
+**legal** — Legal research and analysis. Use when reviewing contracts, researching regulations, or analyzing legal questions.
+
+**strategist** — First principles strategy. Use for strategic analysis, pre-mortems, and decision-making frameworks.
+
+**ai-infra** — LLM infrastructure management. Use when optimizing local model setups, configuring Ollama, or managing model deployments.
+
+**mac** — macOS system administration. Use for macOS-specific operations, configuration, and troubleshooting.
+
+**docker** — Container and Linux operations. Use when working with Docker, containers, and Linux system administration.
+
+**design-ui** — UI component implementation. Use when building user interface components with attention to design quality.
+
+**design-system** — Design system creation. Use when building or maintaining design system tokens, components, and patterns.
+
+**design-review** — Design quality review. Use when reviewing designs for consistency, usability, and adherence to standards.
+
+**design-responsive** — Responsive layout implementation. Use when building layouts that work across screen sizes and devices.
+
+**design-accessibility** — WCAG accessibility compliance. Use when auditing or implementing accessibility features to meet WCAG standards.
 
 ### The Think/No-Think Router
 
@@ -109,13 +127,13 @@ Crux has an automatic internal router that decides whether to "think hard" or "m
 
 **Think mode** activates when you're in planning, architecture, or debugging modes, or when you've asked an open-ended question. Crux will take longer but explore more thoroughly, consider edge cases, and generate well-reasoned solutions.
 
-**No-think mode** activates when you're in execution modes (build-py, build-ts, etc.) doing routine work. Crux moves fast, relies on well-established patterns, and prioritizes speed.
+**No-think mode** activates when you're in execution modes (build-py, build-ex, etc.) doing routine work. Crux moves fast, relies on well-established patterns, and prioritizes speed.
 
 You can override this by prefixing commands with `/think` or `/fast`. For example, `/think /mode build-py` will make Crux deliberate carefully even in a fast mode, useful when tackling a tricky problem.
 
 ### How Modes Affect Tool Access and Sampling
 
-Each mode has a defined **tool tier** it can reach down to. A developer in `debug` mode might access deep instrumentation and runtime inspection tools. A developer in `docs` mode cannot access those tools because they're not relevant. This isn't a restriction—it's a focus that makes Crux faster and safer by not offering inappropriate tools.
+Each mode has a defined **tool tier** it can reach down to. A developer in `debug` mode might access deep instrumentation and runtime inspection tools. A developer in `writer` mode cannot access those tools because they're not relevant. This isn't a restriction—it's a focus that makes Crux faster and safer by not offering inappropriate tools.
 
 **Sampling** also changes. In planning mode, Crux's temperature is set higher, meaning it will propose more varied solutions. In execution modes, temperature is lower—Crux favors the most likely-to-work approach and avoids wild ideas.
 
@@ -269,7 +287,7 @@ You don't have to think about this. It happens automatically. The benefit is tha
 
 ### How the System Enforces Tier Preference
 
-When you ask Crux to do something, it internally debates which tool tier to use. This is logged and visible in `/stats` (daily analytics). If Crux is consistently reaching for tier 6 (raw bash) when tier 2 (custom tools) would work, that's a sign you should register a custom tool or promote a library script.
+When you ask Crux to do something, it internally debates which tool tier to use. This is logged and visible in `/stats` (daily analytics). If Crux is consistently reaching for tier 5 (raw bash) when tier 2 (custom tools) would work, that's a sign you should register a custom tool or promote a library script.
 
 The system will even suggest this in your daily digest: "You've created five similar scripts in the last week. Consider promoting one to your library."
 
@@ -391,7 +409,7 @@ Every day (or on-demand with `/digest`), Crux generates a summary:
 
 **Mode Drift** — If you've been in the same mode for hours doing diverse work, Crux will suggest: "You've been in build-py for 4 hours working on testing, DevOps, and docs. Consider switching modes to specialize?"
 
-**Tool Usage** — Which tool tiers you're using. Spending a lot of time in tier 6 (raw bash)? Crux suggests registering a custom tool.
+**Tool Usage** — Which tool tiers you're using. Spending a lot of time in tier 5 (raw bash)? Crux suggests registering a custom tool.
 
 **Learning Opportunities** — Patterns Crux noticed where you solved something in a non-obvious way. Example: "I saw you use a generator expression instead of a list comprehension here for memory efficiency. That's clever—should I learn that as a preference?"
 
@@ -489,7 +507,7 @@ Example: You're in `build-py` and handoff to `debug`. Crux will tell the debug m
 
 **plan ↔ infra-architect** — You're planning features and realize it affects infrastructure. Handoff to infra-architect to design that layer, then back to plan.
 
-**build-ts ↔ optimize** — You've built a feature, it's slow. Handoff to optimize to profile and improve. The optimize mode has different tools for performance work.
+**build-py ↔ test** — You've built a feature, you need tests. Handoff to test to design and write comprehensive test coverage.
 
 **any mode ↔ review** — At any point, handoff to review mode for a code review. It will review everything you've done so far and flag issues.
 
@@ -574,7 +592,7 @@ View the daily digest on-demand.
 
 **/propose-mode**
 
-Propose a new custom mode based on your usage patterns. If Crux detects you consistently doing work that doesn't fit the 15 standard modes, it suggests creating a custom one.
+Propose a new custom mode based on your usage patterns. If Crux detects you consistently doing work that doesn't fit the 24 standard modes, it suggests creating a custom one.
 
 ```
 /propose-mode
@@ -660,7 +678,7 @@ Once you've built strong project knowledge, you can share it:
 
 ### How Modes Evolve Over Time
 
-The 15 standard modes are good baselines. But over time, Crux might detect that you work differently. Example: You consistently mix infrastructure work with security concerns. Crux suggests a custom mode called "secure-infra."
+The 24 standard modes are good baselines. But over time, Crux might detect that you work differently. Example: You consistently mix infrastructure work with security concerns. Crux suggests a custom mode called "secure-infra."
 
 You can create custom modes with `/propose-mode`, and they become available immediately. Custom modes have the same flexibility as standard modes—Crux will tailor tool access, sampling, and safety constraints to your specialized mode.
 
@@ -691,7 +709,7 @@ If you create a particularly useful script, knowledge entry, or custom mode that
 
 **Read your scripts before approving.** The safety pipeline catches most issues, but review scripts still matters. Scan them. If something looks odd, reject it and ask Crux to try again.
 
-**Experiment in prototype mode.** When exploring new ideas, switch to `prototype` mode. Constraints loosen, Crux moves faster, and you're not worried about breaking things. Once the spike works, move to production modes.
+**Use debug mode for exploration.** When investigating issues or exploring unfamiliar code, switch to `debug` mode. It has full tool access and think-mode reasoning for thorough analysis.
 
 ---
 

@@ -5,10 +5,17 @@ import os
 import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from scripts.lib.crux_bip_gather import gather_content, BIPContext
+from scripts.lib.crux_bip_gather import (
+    gather_content,
+    BIPContext,
+    _gather_git,
+    _gather_corrections,
+    _gather_session,
+)
 from scripts.lib.crux_bip import record_history
 
 
@@ -221,3 +228,160 @@ class TestBIPContext:
         (project / ".crux" / "bip").mkdir(parents=True)
         ctx = gather_content(project_dir=str(project), home=str(tmp_path))
         assert ctx.has_material is False
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+class TestGatherGitTimeout:
+    def test_subprocess_timeout(self, monkeypatch):
+        """Lines 91-92: subprocess.TimeoutExpired returns empty."""
+        def timeout_run(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="git", timeout=10)
+
+        monkeypatch.setattr(subprocess, "run", timeout_run)
+        messages, hashes, files = _gather_git("/nonexistent")
+        assert messages == []
+        assert hashes == []
+        assert files == []
+
+    def test_file_not_found(self, monkeypatch):
+        """Lines 91-92: FileNotFoundError (git not installed) returns empty."""
+        def no_git(*args, **kwargs):
+            raise FileNotFoundError("git not found")
+
+        monkeypatch.setattr(subprocess, "run", no_git)
+        messages, hashes, files = _gather_git("/nonexistent")
+        assert messages == []
+
+
+class TestGatherCorrectionsEdgeCases:
+    def test_since_without_timezone(self, tmp_path):
+        """Lines 109-111: since timestamp without timezone gets UTC."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        now = datetime.now(timezone.utc)
+        corrections_file.write_text(
+            json.dumps({"pattern": "test", "timestamp": now.isoformat()}) + "\n"
+        )
+        # since without timezone info
+        since = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        entries = _gather_corrections(str(crux_dir), since=since)
+        assert len(entries) == 1
+
+    def test_empty_lines_skipped(self, tmp_path):
+        """Line 118: empty lines in corrections file are skipped."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        corrections_file.write_text(
+            json.dumps({"pattern": "valid"}) + "\n"
+            + "\n"
+            + "   \n"
+            + json.dumps({"pattern": "also valid"}) + "\n"
+        )
+        entries = _gather_corrections(str(crux_dir))
+        assert len(entries) == 2
+
+    def test_json_decode_error_skipped(self, tmp_path):
+        """Lines 121-122: invalid JSON lines are skipped."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        corrections_file.write_text(
+            json.dumps({"pattern": "valid"}) + "\n"
+            + "not valid json\n"
+            + json.dumps({"pattern": "also valid"}) + "\n"
+        )
+        entries = _gather_corrections(str(crux_dir))
+        assert len(entries) == 2
+
+    def test_entry_timestamp_without_timezone(self, tmp_path):
+        """Lines 128: entry timestamp without timezone gets UTC."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        # Entry timestamp without timezone — use UTC time to avoid comparison issues
+        naive_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        corrections_file.write_text(
+            json.dumps({"pattern": "test", "timestamp": naive_ts}) + "\n"
+        )
+        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        entries = _gather_corrections(str(crux_dir), since=since)
+        assert len(entries) == 1
+
+    def test_entry_timestamp_value_error(self, tmp_path):
+        """Lines 131-132: invalid entry timestamp is ignored (entry still included)."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        corrections_file.write_text(
+            json.dumps({"pattern": "test", "timestamp": "not-a-timestamp"}) + "\n"
+        )
+        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        entries = _gather_corrections(str(crux_dir), since=since)
+        # Entry with bad timestamp should still be included (ValueError caught, pass)
+        assert len(entries) == 1
+
+    def test_oserror_reading_file(self, tmp_path, monkeypatch):
+        """Lines 135-136: OSError reading corrections file returns empty."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        corrections_file.write_text(json.dumps({"pattern": "test"}) + "\n")
+
+        import builtins
+        original_open = builtins.open
+
+        def failing_open(path, *a, **kw):
+            if "corrections.jsonl" in str(path):
+                raise OSError("permission denied")
+            return original_open(path, *a, **kw)
+
+        monkeypatch.setattr(builtins, "open", failing_open)
+        entries = _gather_corrections(str(crux_dir))
+        assert entries == []
+
+    def test_since_invalid_format(self, tmp_path):
+        """Lines 110-111: invalid since format sets since_dt to None."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "corrections").mkdir(parents=True)
+        corrections_file = crux_dir / "corrections" / "corrections.jsonl"
+        corrections_file.write_text(
+            json.dumps({"pattern": "test"}) + "\n"
+        )
+        entries = _gather_corrections(str(crux_dir), since="not-a-date")
+        # Should not filter (since_dt is None), so entry is included
+        assert len(entries) == 1
+
+
+class TestGatherSessionEdgeCases:
+    def test_corrupt_session_json(self, tmp_path):
+        """Lines 164-165: corrupt session JSON returns empty dict."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "sessions").mkdir(parents=True)
+        state_path = crux_dir / "sessions" / "state.json"
+        state_path.write_text("not valid json{{{")
+        result = _gather_session(str(crux_dir))
+        assert result == {}
+
+    def test_session_oserror(self, tmp_path, monkeypatch):
+        """Lines 164-165: OSError reading session returns empty dict."""
+        crux_dir = tmp_path / ".crux"
+        (crux_dir / "sessions").mkdir(parents=True)
+        state_path = crux_dir / "sessions" / "state.json"
+        state_path.write_text(json.dumps({"active_mode": "code"}))
+
+        import builtins
+        original_open = builtins.open
+
+        def failing_open(path, *a, **kw):
+            if "state.json" in str(path):
+                raise OSError("permission denied")
+            return original_open(path, *a, **kw)
+
+        monkeypatch.setattr(builtins, "open", failing_open)
+        result = _gather_session(str(crux_dir))
+        assert result == {}

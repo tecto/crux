@@ -2,7 +2,7 @@
 
 ## Principle
 
-The AI does not directly modify files. Everything flows through scripts in `.opencode/scripts/`. Scripts are templated, validated, tested, and can be promoted to reusable library status.
+The AI does not directly modify files. Everything flows through scripts in `.crux/scripts/`. Scripts are templated, validated, tested, and can be promoted to reusable library status.
 
 ## Why Scripts-First
 
@@ -15,11 +15,11 @@ The AI does not directly modify files. Everything flows through scripts in `.ope
 ## Script Lifecycle
 
 ```
-Session Script (.opencode/scripts/session/)
+Session Script (.crux/scripts/session/)
     ↓ promote_script tool
-Library Script (.opencode/scripts/lib/)
+Library Script (.crux/scripts/lib/)
     ↓ manual promotion
-Archive (.opencode/scripts/archive/)
+Archive (.crux/scripts/archive/)
 ```
 
 ## Script Template

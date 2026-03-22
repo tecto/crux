@@ -9,6 +9,11 @@ import pytest
 from scripts.lib.extract_corrections import (
     CorrectionCluster,
     CorrectionEntry,
+    _truncate_field,
+    _validate_string_field,
+    _MAX_ENTRIES_PER_FILE,
+    _MAX_FILES_TO_SCAN,
+    _MAX_LINE_LENGTH,
     cluster_corrections,
     extract_corrections,
     generate_knowledge_candidate,
@@ -206,3 +211,99 @@ class TestCLI:
         assert exc.value.code == 0
         captured = capsys.readouterr()
         assert "No significant" in captured.out
+
+
+class TestTruncateField:
+    def test_truncates_long_value(self):
+        long_val = "x" * 20000
+        result = _truncate_field(long_val, max_length=100)
+        assert len(result) == 100 + len("...[truncated]")
+        assert result.endswith("...[truncated]")
+
+
+class TestValidateStringField:
+    def test_none_returns_empty(self):
+        assert _validate_string_field(None, "test") == ""
+
+    def test_non_string_converted(self):
+        assert _validate_string_field(42, "test") == "42"
+
+    def test_unconvertible_returns_empty(self):
+        class BadObj:
+            def __str__(self):
+                raise RuntimeError("cannot convert")
+        assert _validate_string_field(BadObj(), "test") == ""
+
+
+class TestParseReflectionsFileSecurity:
+    def test_max_entries_limit(self, temp_dir):
+        path = os.path.join(temp_dir, "big.jsonl")
+        with open(path, "w") as f:
+            for _ in range(_MAX_ENTRIES_PER_FILE + 10):
+                f.write(make_reflection() + "\n")
+        entries = parse_reflections_file(path)
+        assert len(entries) == _MAX_ENTRIES_PER_FILE
+
+    def test_oversized_line_skipped(self, temp_dir):
+        path = os.path.join(temp_dir, "big_line.jsonl")
+        with open(path, "w") as f:
+            # Write a line that exceeds _MAX_LINE_LENGTH
+            huge = json.dumps({"type": "self-correction", "data": "x" * (_MAX_LINE_LENGTH + 1)})
+            f.write(huge + "\n")
+            f.write(make_reflection() + "\n")
+        entries = parse_reflections_file(path)
+        assert len(entries) == 1
+
+    def test_non_dict_json_skipped(self, temp_dir):
+        path = os.path.join(temp_dir, "array.jsonl")
+        with open(path, "w") as f:
+            f.write("[1, 2, 3]\n")
+            f.write(make_reflection() + "\n")
+        entries = parse_reflections_file(path)
+        assert len(entries) == 1
+
+    def test_os_error_returns_empty(self, temp_dir):
+        # Create a directory with the same name to trigger an OS error on open
+        dir_path = os.path.join(temp_dir, "notafile.jsonl")
+        os.mkdir(dir_path)
+        entries = parse_reflections_file(dir_path)
+        assert entries == []
+
+
+class TestScanReflectionsDirSecurity:
+    def test_os_error_on_listdir(self, temp_dir):
+        # Pass a file (not a directory) to trigger OSError on listdir
+        file_path = os.path.join(temp_dir, "afile.txt")
+        with open(file_path, "w") as f:
+            f.write("hi")
+        entries = scan_reflections_dir(file_path)
+        assert entries == []
+
+    def test_max_files_limit(self, temp_dir):
+        for i in range(_MAX_FILES_TO_SCAN + 5):
+            with open(os.path.join(temp_dir, f"file_{i:04d}.jsonl"), "w") as f:
+                f.write(make_reflection() + "\n")
+        entries = scan_reflections_dir(temp_dir)
+        assert len(entries) == _MAX_FILES_TO_SCAN
+
+    def test_skips_non_regular_file(self, temp_dir):
+        # Create a subdirectory named something.jsonl
+        subdir = os.path.join(temp_dir, "subdir.jsonl")
+        os.mkdir(subdir)
+        # Also add a real file
+        with open(os.path.join(temp_dir, "real.jsonl"), "w") as f:
+            f.write(make_reflection() + "\n")
+        entries = scan_reflections_dir(temp_dir)
+        assert len(entries) == 1
+
+    def test_total_entries_limit(self, temp_dir):
+        # Create files with many entries to exceed _MAX_ENTRIES_PER_FILE * 10
+        entries_per_file = _MAX_ENTRIES_PER_FILE
+        # We need > _MAX_ENTRIES_PER_FILE * 10 total entries across files
+        num_files = 12  # 12 * 10000 > 100000
+        for i in range(num_files):
+            with open(os.path.join(temp_dir, f"file_{i:04d}.jsonl"), "w") as f:
+                for _ in range(entries_per_file):
+                    f.write(make_reflection() + "\n")
+        entries = scan_reflections_dir(temp_dir)
+        assert len(entries) <= _MAX_ENTRIES_PER_FILE * 10 + entries_per_file

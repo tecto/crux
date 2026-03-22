@@ -142,9 +142,10 @@ def secure_write_file(path: str, content: str, mode: int = 0o600) -> None:
         os.fchmod(fd, mode)
         os.write(fd, content.encode('utf-8'))
         os.close(fd)
+        fd = -1
         os.rename(temp_path, path)  # Atomic on POSIX
     except Exception:
-        os.close(fd) if fd else None
+        os.close(fd) if fd >= 0 else None
         try:
             os.unlink(temp_path)
         except OSError:

@@ -46,6 +46,11 @@ function preflightCheck(content, scriptPath) {
   return { passed: errors.length === 0, errors, risk };
 }
 
+// Gate 2-3 (8B/32B Ollama) auditing is handled by the MCP server via
+// crux_audit_backend.py, which provides multi-backend support (Ollama,
+// Anthropic, OpenAI, Claude subagent) with graceful fallback.
+// This JS bridge is retained for non-MCP environments where tools are
+// loaded directly by OpenCode's plugin system.
 function runPythonAudit(scriptContent, riskLevel, gate) {
   return new Promise((resolve) => {
     const fn = gate === '8b' ? 'audit_script_8b' : 'audit_script_32b';

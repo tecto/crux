@@ -1,6 +1,6 @@
 # Tool Resolution Hierarchy
 
-## Five-Tier System
+## Six-Tier System
 
 Tools are organized in tiers by reliability and determinism. The system always prefers higher (lower-numbered) tiers.
 
@@ -13,7 +13,7 @@ Tools are organized in tiers by reliability and determinism. The system always p
 ### Tier 1: Custom Tools
 - Schema-validated inputs (Zod)
 - Atomic, deterministic operations
-- `run_script`, `lookup_knowledge`, `suggest_handoff`, `project_context`, `promote_script`, `list_scripts`, `manage_models`
+- `run_script`, `lookup_knowledge`, `suggest_handoff`, `project_context`, `promote_script`, `list_scripts`, `manage_models`, `marketing_generate`, `marketing_update_state`
 
 ### Tier 2: MCP Servers
 - Protocol-enforced external access
@@ -21,7 +21,7 @@ Tools are organized in tiers by reliability and determinism. The system always p
 - High reliability through protocol standardization
 
 ### Tier 3: Library Scripts
-- Pre-tested, versioned in `.opencode/scripts/lib/`
+- Pre-tested, versioned in `.crux/scripts/lib/`
 - Proven safe through previous execution
 - `backup_database.sh`, `run_tests.sh`
 

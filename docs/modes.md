@@ -2,7 +2,7 @@
 
 ## Overview
 
-Crux uses 15 specialized modes instead of a single general-purpose system prompt. Each mode is optimized for a specific domain with its own persona, tool access, and reasoning style.
+Crux uses 24 specialized modes instead of a single general-purpose system prompt. Each mode is optimized for a specific domain with its own persona, tool access, and reasoning style.
 
 ## Design Rules
 
@@ -18,32 +18,43 @@ Every mode prompt follows four empirically-validated rules:
 
 ## Mode Categories
 
-### Core Coding (4)
+### Core Coding (3)
 - **build-py**: Python development (no_think, full tools)
 - **build-ex**: Elixir/Phoenix/Ash (no_think, full tools)
-- **docker**: Container operations (no_think, full tools)
-- **debug**: Root cause analysis (think, full tools)
+- **test**: Test-first development (no_think, full tools)
 
 ### Architecture and Planning (3)
 - **plan**: Software architecture (think, read-only)
 - **infra-architect**: Deployment/CI-CD (think, read-only)
-- **strategist**: First principles strategy (think, limited)
+- **debug**: Root cause analysis (think, full tools)
 
-### Specialized Technical (2)
+### Quality (2)
 - **review**: Code review (think, read-only)
-- **mac**: macOS systems (no_think, limited)
+- **security**: Adversarial vulnerability analysis (think, read-only)
 
-### Creative and Communication (2)
-- **writer**: Professional writing (no_think, limited)
+### Creative and Communication (5)
+- **writer**: Professional writing (no_think, read-only)
 - **analyst**: Data analysis (no_think, full tools)
+- **explain**: Teaching/mentoring (no_think, read-only)
+- **marketing**: Marketing strategy/copywriting (no_think, read-only)
+- **build-in-public**: Shipping update content (no_think, full tools)
 
 ### Domain Expertise (3)
 - **psych**: ACT/Attachment/Shadow/Somatic (think, read-only)
-- **legal**: Legal research (think, limited)
-- **explain**: Teaching/mentoring (no_think, read-only)
+- **legal**: Legal research (think, read-only)
+- **strategist**: First principles strategy (think, read-only)
 
-### Infrastructure (1)
-- **ai-infra**: LLM infrastructure (neutral, full tools)
+### Infrastructure (4)
+- **ai-infra**: LLM infrastructure (no_think, full tools)
+- **mac**: macOS systems (no_think, read-only)
+- **docker**: Container operations (no_think, full tools)
+
+### Design (5)
+- **design-ui**: UI component implementation (no_think, full tools)
+- **design-system**: Design system creation (no_think, full tools)
+- **design-review**: Design quality review (think, read-only)
+- **design-responsive**: Responsive layout (no_think, full tools)
+- **design-accessibility**: WCAG compliance (think, read-only)
 
 ## Think vs No-Think Routing
 

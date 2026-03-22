@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(npm install:*)",
+      "Bash(bats:*)",
+      "Bash(node:*)",
+      "Bash(wc:*)",
+      "Bash(bash:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -6,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=/home/key/.crux /home/key/.crux/.venv/bin/python -m scripts.lib.crux_hook_runner SessionStart"
+            "command": "/opt/homebrew/opt/python@3.14/libexec/bin/python -m scripts.lib.crux_hook_runner SessionStart"
           }
         ]
       }
@@ -17,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=/home/key/.crux /home/key/.crux/.venv/bin/python -m scripts.lib.crux_hook_runner PostToolUse"
+            "command": "/opt/homebrew/opt/python@3.14/libexec/bin/python -m scripts.lib.crux_hook_runner PostToolUse"
           }
         ]
       }
@@ -28,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=/home/key/.crux /home/key/.crux/.venv/bin/python -m scripts.lib.crux_hook_runner UserPromptSubmit"
+            "command": "/opt/homebrew/opt/python@3.14/libexec/bin/python -m scripts.lib.crux_hook_runner UserPromptSubmit"
           }
         ]
       }
@@ -39,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=/home/key/.crux /home/key/.crux/.venv/bin/python -m scripts.lib.crux_hook_runner Stop"
+            "command": "/opt/homebrew/opt/python@3.14/libexec/bin/python -m scripts.lib.crux_hook_runner Stop"
           }
         ]
       }

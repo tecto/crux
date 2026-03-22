@@ -2,9 +2,11 @@
 
 import json
 import os
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -205,3 +207,101 @@ class TestDeleteDraft:
         mock_urlopen.return_value = _mock_response(404, {"error": "not found"})
         with pytest.raises(TypefullyError):
             delete_draft(client, 999)
+
+
+# ---------------------------------------------------------------------------
+# Security: world-readable key file
+# ---------------------------------------------------------------------------
+
+class TestWorldReadableKeyFile:
+    def test_rejects_world_readable_key(self, tmp_path):
+        d = tmp_path / ".crux" / "bip"
+        d.mkdir(parents=True)
+        key_file = d / "typefully.key"
+        key_file.write_text("secret-key")
+        key_file.chmod(0o644)  # world-readable
+        config = {"social_set_id": 1, "api_key_path": str(key_file)}
+        (d / "config.json").write_text(json.dumps(config))
+        with pytest.raises(TypefullyError, match="world-readable"):
+            TypefullyClient(bip_dir=str(d))
+
+
+# ---------------------------------------------------------------------------
+# Repr / Str sanitization
+# ---------------------------------------------------------------------------
+
+class TestReprStr:
+    def test_repr_hides_key(self, client):
+        r = repr(client)
+        assert "TypefullyClient" in r
+        assert "288244" in r
+        assert "test-api-key" not in r
+
+    def test_str_hides_key(self, client):
+        s = str(client)
+        assert "TypefullyClient" in s
+        assert "test-api-key" not in s
+
+
+# ---------------------------------------------------------------------------
+# Path validation
+# ---------------------------------------------------------------------------
+
+class TestValidatePath:
+    def test_rejects_no_leading_slash(self, client):
+        with pytest.raises(TypefullyError, match="must start with /"):
+            client._validate_path("drafts")
+
+    def test_rejects_double_slash(self, client):
+        with pytest.raises(TypefullyError, match="cannot contain //"):
+            client._validate_path("//drafts")
+
+    def test_rejects_path_traversal(self, client):
+        with pytest.raises(TypefullyError, match="cannot contain .."):
+            client._validate_path("/../etc/passwd")
+
+
+# ---------------------------------------------------------------------------
+# Error handling in _request
+# ---------------------------------------------------------------------------
+
+class TestRequestErrors:
+    @patch("scripts.lib.crux_typefully.urlopen")
+    def test_http_error_raises(self, mock_urlopen, client):
+        mock_urlopen.side_effect = HTTPError(
+            url="http://test", code=422, msg="Unprocessable",
+            hdrs=MagicMock(), fp=MagicMock()
+        )
+        with pytest.raises(TypefullyError, match="HTTP 422"):
+            client._request("GET", "/drafts")
+
+    @patch("scripts.lib.crux_typefully.urlopen")
+    def test_url_error_raises(self, mock_urlopen, client):
+        mock_urlopen.side_effect = URLError("Connection refused")
+        with pytest.raises(TypefullyError, match="connection failed"):
+            client._request("GET", "/drafts")
+
+    @patch("scripts.lib.crux_typefully.urlopen")
+    def test_json_decode_error_raises(self, mock_urlopen, client):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b"not json"
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = resp
+        with pytest.raises(TypefullyError, match="Invalid response"):
+            client._request("GET", "/drafts")
+
+
+# ---------------------------------------------------------------------------
+# Thread with publish_at
+# ---------------------------------------------------------------------------
+
+class TestCreateThreadPublishAt:
+    @patch("scripts.lib.crux_typefully.urlopen")
+    def test_thread_includes_publish_at(self, mock_urlopen, client):
+        mock_urlopen.return_value = _mock_response(200, {"id": 1})
+        create_thread(client, ["tweet1", "tweet2"], publish_at="2026-03-07T12:00:00Z")
+        req = mock_urlopen.call_args[0][0]
+        body = json.loads(req.data.decode())
+        assert body["publish_at"] == "2026-03-07T12:00:00Z"

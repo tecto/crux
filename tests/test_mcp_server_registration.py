@@ -314,3 +314,24 @@ class TestToolWrappers:
         assert entry["role"] == "user"
         assert entry["content"] == "build the login page"
         assert entry["tool"] == "claude-code"  # live_env fixture sets active_tool=claude-code
+
+
+# ---------------------------------------------------------------------------
+# BIP tool wrapper coverage — lines 448, 467, 478
+# ---------------------------------------------------------------------------
+
+class TestBipToolWrappers:
+    """Test the thin MCP tool wrappers for BIP functions."""
+
+    def test_bip_generate_returns_result(self, live_env):
+        result = live_env["mod"].bip_generate()
+        # Should return a dict with trigger/content info
+        assert isinstance(result, dict)
+
+    def test_bip_approve_returns_result(self, live_env):
+        result = live_env["mod"].bip_approve(draft_text="Shipped a new feature today!")
+        assert isinstance(result, dict)
+
+    def test_bip_status_returns_result(self, live_env):
+        result = live_env["mod"].bip_status()
+        assert isinstance(result, dict)

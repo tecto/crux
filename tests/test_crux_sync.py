@@ -711,3 +711,74 @@ class TestSyncEdgeCases:
         with open(mcp_path) as f:
             config = json.load(f)
         assert "crux" in config["mcpServers"]
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests — lines 149-150, 302, 327, 436, 481
+# ---------------------------------------------------------------------------
+
+class TestSyncCoverageGaps:
+    """Coverage gap tests for crux_sync.py."""
+
+    def test_safe_symlink_handles_rename_oserror(self, env, monkeypatch):
+        """Lines 149-150: OSError during os.rename in _safe_symlink is swallowed."""
+        from scripts.lib.crux_sync import _safe_symlink
+        target = os.path.join(env["project"], "test_link")
+        source = os.path.join(env["project"], ".crux")
+
+        # Create a regular file at target first so the rename path is triggered
+        with open(target, "w") as f:
+            f.write("existing")
+
+        original_rename = os.rename
+
+        def failing_rename(src, dst):
+            if "test_link" in str(src):
+                raise OSError("rename failed")
+            return original_rename(src, dst)
+
+        monkeypatch.setattr(os, "rename", failing_rename)
+        # Should not raise — the OSError is caught and symlink still created
+        _safe_symlink(source, target)
+
+    def test_claude_code_skips_unsafe_mode_filename(self, env):
+        """Line 302: unsafe mode filename is skipped during sync."""
+        modes_dir = Path(env["home"]) / ".crux" / "modes"
+        # Create a mode file with an unsafe name (contains ..)
+        unsafe_file = modes_dir / "..evil.md"
+        unsafe_file.write_text("# Evil mode")
+
+        result = sync_claude_code(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        # The unsafe mode should not appear in synced items
+        assert "agent:..evil" not in result.items_synced
+
+    def test_claude_code_skips_unsafe_knowledge_filename(self, env):
+        """Line 327: unsafe knowledge filename is skipped during sync."""
+        k_dir = Path(env["project"]) / ".crux" / "knowledge"
+        unsafe_file = k_dir / "..traversal.md"
+        unsafe_file.write_text("# Bad knowledge")
+
+        result = sync_claude_code(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert "rule:..traversal" not in result.items_synced
+
+    def test_cursor_skips_unsafe_mode_filename(self, env):
+        """Line 436: unsafe mode filename is skipped in cursor sync."""
+        modes_dir = Path(env["home"]) / ".crux" / "modes"
+        unsafe_file = modes_dir / "..evil.md"
+        unsafe_file.write_text("# Evil mode")
+
+        result = sync_cursor(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert "rule:..evil" not in result.items_synced
+
+    def test_windsurf_skips_unsafe_mode_filename(self, env):
+        """Line 481: unsafe mode filename is skipped in windsurf sync."""
+        modes_dir = Path(env["home"]) / ".crux" / "modes"
+        unsafe_file = modes_dir / "..evil.md"
+        unsafe_file.write_text("# Evil mode")
+
+        result = sync_windsurf(project_dir=env["project"], home=env["home"])
+        assert result.success is True
+        assert "rule:..evil" not in result.items_synced

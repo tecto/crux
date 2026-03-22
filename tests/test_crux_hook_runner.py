@@ -89,6 +89,52 @@ class TestHookRunnerMain:
         assert captured.out == ""
 
 
+class TestValidateEventData:
+    """Lines 25-34: _validate_event_data function."""
+
+    def test_non_dict_returns_false(self):
+        from scripts.lib.crux_hook_runner import _validate_event_data
+        assert _validate_event_data("not a dict") is False
+        assert _validate_event_data([1, 2]) is False
+        assert _validate_event_data(None) is False
+
+    def test_missing_hook_event_name(self):
+        from scripts.lib.crux_hook_runner import _validate_event_data
+        assert _validate_event_data({}) is False
+        assert _validate_event_data({"other": "field"}) is False
+
+    def test_non_string_event_name(self):
+        from scripts.lib.crux_hook_runner import _validate_event_data
+        assert _validate_event_data({"hook_event_name": 42}) is False
+        assert _validate_event_data({"hook_event_name": None}) is False
+
+    def test_invalid_event_name(self):
+        from scripts.lib.crux_hook_runner import _validate_event_data
+        assert _validate_event_data({"hook_event_name": "NotAnEvent"}) is False
+        assert _validate_event_data({"hook_event_name": ""}) is False
+
+    def test_valid_event_names(self):
+        from scripts.lib.crux_hook_runner import _validate_event_data
+        for name in ("SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"):
+            assert _validate_event_data({"hook_event_name": name}) is True
+
+
+class TestHookRunnerInputLimit:
+    """Lines 44-45: input-too-large guard."""
+
+    def test_oversized_input_exits(self, env, monkeypatch, capsys):
+        from scripts.lib import crux_hook_runner
+
+        # Create input that is exactly _MAX_INPUT_SIZE (1MB)
+        huge = "x" * crux_hook_runner._MAX_INPUT_SIZE
+        monkeypatch.setattr("sys.stdin", StringIO(huge))
+        with pytest.raises(SystemExit) as exc_info:
+            crux_hook_runner.main()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Input too large" in captured.err
+
+
 class TestHookRunnerTddEnforcement:
     """Stop hook must output a directive when source files lack test coverage."""
 

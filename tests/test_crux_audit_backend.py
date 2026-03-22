@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -790,3 +791,441 @@ class TestBackendStatusPlan182:
             assert "configured" in status
             assert status["configured"]["primary"] == "ollama"
             assert status["configured"]["adversarial"] == "anthropic"
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaBackendEndpoint:
+    """Cover line 136: OllamaBackend.audit passes endpoint kwarg."""
+
+    @patch("scripts.lib.crux_audit_backend.generate")
+    def test_audit_passes_endpoint(self, mock_generate):
+        mock_generate.return_value = {
+            "success": True,
+            "response": json.dumps({"passed": True, "findings": [], "summary": "ok"}),
+        }
+        backend = OllamaBackend(model="qwen3:8b", endpoint="http://custom:11434")
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.passed is True
+        assert result.skipped is False
+        # Verify endpoint was passed to generate
+        mock_generate.assert_called_once()
+        call_kwargs = mock_generate.call_args
+        assert call_kwargs.kwargs.get("endpoint") == "http://custom:11434" or \
+               (len(call_kwargs.args) == 0 and "endpoint" in call_kwargs[1])
+
+
+class TestAnthropicGetClient:
+    """Cover lines 211-216: AnthropicBackend._get_client paths."""
+
+    def test_get_client_import_error(self):
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "anthropic":
+                raise ImportError("no anthropic")
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            with patch("builtins.__import__", side_effect=mock_import):
+                client = backend._get_client()
+                assert client is None
+
+    def test_get_client_success(self):
+        """Cover line 213: successful client creation."""
+        mock_anthropic_cls = MagicMock()
+        mock_module = MagicMock()
+        mock_module.Anthropic = mock_anthropic_cls
+
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "anthropic":
+                return mock_module
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            with patch("builtins.__import__", side_effect=mock_import):
+                client = backend._get_client()
+                assert client is not None
+
+
+class TestAnthropicAuditUnparseable:
+    """Cover line 256: Anthropic audit returns unparseable JSON."""
+
+    def test_audit_unparseable_response(self):
+        mock_client = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(text="not valid json at all")]
+        mock_client.messages.create.return_value = mock_message
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.skipped is True
+            assert "parse" in result.reason.lower()
+
+
+class TestAnthropicAuditException:
+    """Cover lines 281-283: Anthropic audit API exception."""
+
+    def test_audit_api_exception(self):
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = RuntimeError("API timeout")
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            backend = AnthropicBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.skipped is True
+            assert "API error" in result.reason
+
+
+class TestOpenAIGetClient:
+    """Cover lines 326-331: OpenAIBackend._get_client paths."""
+
+    def test_get_client_import_error(self):
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "openai":
+                raise ImportError("no openai")
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            with patch("builtins.__import__", side_effect=mock_import):
+                client = backend._get_client()
+                assert client is None
+
+    def test_get_client_success(self):
+        """Cover line 328: successful client creation."""
+        mock_openai_cls = MagicMock()
+        mock_module = MagicMock()
+        mock_module.OpenAI = mock_openai_cls
+
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "openai":
+                return mock_module
+            return original_import(name, *args, **kwargs)
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            with patch("builtins.__import__", side_effect=mock_import):
+                client = backend._get_client()
+                assert client is not None
+
+
+class TestOpenAIAuditUnparseable:
+    """Cover line 373: OpenAI audit returns unparseable JSON."""
+
+    def test_audit_unparseable_response(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="not json"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.skipped is True
+            assert "parse" in result.reason.lower()
+
+
+class TestOpenAIAuditException:
+    """Cover lines 398-400: OpenAI audit API exception."""
+
+    def test_audit_api_exception(self):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = RuntimeError("API timeout")
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            backend = OpenAIBackend()
+            backend._client = mock_client
+            result = backend.audit("echo hello", "low", "system prompt")
+
+            assert result.skipped is True
+            assert "API error" in result.reason
+
+
+class TestClaudeSubagentFindBinary:
+    """Cover lines 447-448: _find_claude_binary file exists path."""
+
+    @patch("os.access", return_value=True)
+    @patch("os.path.isfile", return_value=True)
+    @patch("subprocess.run")
+    def test_find_binary_from_file_path(self, mock_run, mock_isfile, mock_access):
+        # The first candidate (~/.claude/local/claude) should match
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        result = backend._find_claude_binary()
+        assert result is not None
+
+    @patch("os.access", return_value=False)
+    @patch("os.path.isfile", return_value=False)
+    @patch("subprocess.run")
+    def test_find_binary_from_path_which(self, mock_run, mock_isfile, mock_access):
+        # All file paths fail, "which claude" succeeds
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/claude\n")
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        result = backend._find_claude_binary()
+        assert result == "/usr/bin/claude"
+
+    @patch("os.access", return_value=False)
+    @patch("os.path.isfile", return_value=False)
+    @patch("subprocess.run")
+    def test_find_binary_which_fails(self, mock_run, mock_isfile, mock_access):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        result = backend._find_claude_binary()
+        assert result is None
+
+
+class TestClaudeSubagentAudit:
+    """Cover lines 475-544: ClaudeSubagentBackend.audit subprocess paths."""
+
+    @patch("subprocess.run")
+    def test_audit_success(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"passed": True, "findings": [], "summary": "ok"}),
+            stderr="",
+        )
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.passed is True
+        assert result.skipped is False
+        assert result.summary == "ok"
+
+    @patch("subprocess.run")
+    def test_audit_with_findings(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({
+                "passed": False,
+                "findings": [{"severity": "high", "title": "Bad", "description": "Very bad"}],
+                "summary": "issues",
+            }),
+            stderr="",
+        )
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("rm -rf /", "high", "system prompt")
+
+        assert result.passed is False
+        assert len(result.findings) == 1
+
+    @patch("subprocess.run")
+    def test_audit_cli_failure(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Error: something went wrong",
+        )
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.skipped is True
+        assert "failed" in result.reason.lower()
+
+    @patch("subprocess.run")
+    def test_audit_unparseable_response(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="not json at all",
+            stderr="",
+        )
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.skipped is True
+        assert "parse" in result.reason.lower()
+
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=120))
+    def test_audit_timeout(self, mock_run):
+        import subprocess
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.skipped is True
+        assert "timed out" in result.reason.lower()
+
+    @patch("subprocess.run", side_effect=OSError("Permission denied"))
+    def test_audit_os_error(self, mock_run):
+        backend = ClaudeSubagentBackend.__new__(ClaudeSubagentBackend)
+        backend._claude_path = "/usr/local/bin/claude"
+        result = backend.audit("echo hello", "low", "system prompt")
+
+        assert result.skipped is True
+        assert "error" in result.reason.lower()
+
+
+class TestDetectOpenCodeStateFile:
+    """Cover lines 612-619, 623: detect_opencode_context state file and OPENCODE_SESSION."""
+
+    def test_opencode_from_state_file(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="opencode\n"):
+                    assert detect_opencode_context() is True
+
+    def test_claude_code_from_state_file(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="claude-code\n"):
+                    assert detect_opencode_context() is False
+
+    def test_both_from_state_file(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="both\n"):
+                    assert detect_opencode_context() is False
+
+    def test_state_file_read_error(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", side_effect=OSError("denied")):
+                    # Should fall through gracefully
+                    assert detect_opencode_context() is False
+
+    def test_opencode_session_env(self):
+        with patch.dict("os.environ", {"OPENCODE_SESSION": "1"}, clear=True):
+            with patch("pathlib.Path.exists", return_value=False):
+                assert detect_opencode_context() is True
+
+
+class TestDetectContextModeStateFile:
+    """Cover lines 640, 644, 648-653: detect_context_mode state file paths."""
+
+    def test_context_mode_claude_code_from_env(self):
+        with patch.dict("os.environ", {"CLAUDE_CODE_ENTRY_POINT": "1"}, clear=True):
+            with patch("pathlib.Path.exists", return_value=False):
+                mode = detect_context_mode()
+                assert mode == "claude-code"
+
+    def test_context_mode_from_state_file_claude_code(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="claude-code\n"):
+                    mode = detect_context_mode()
+                    assert mode == "claude-code"
+
+    def test_context_mode_from_state_file_both(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="both\n"):
+                    mode = detect_context_mode()
+                    assert mode == "both"
+
+    def test_context_mode_from_state_file_opencode(self):
+        with patch.dict("os.environ", {"CRUX_TOOL": "opencode"}, clear=True):
+            mode = detect_context_mode()
+            assert mode == "opencode"
+
+    def test_context_mode_state_file_read_error(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", side_effect=OSError("denied")):
+                    mode = detect_context_mode()
+                    assert mode == "unknown"
+
+    def test_context_mode_state_file_unknown_tool(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.read_text", return_value="vim\n"):
+                    mode = detect_context_mode()
+                    assert mode == "unknown"
+
+
+class TestCreateBackendFinalReturn:
+    """Cover line 701: _create_backend final return None."""
+
+    def test_create_backend_with_default_models(self):
+        # Test each backend type without explicit model to cover default paths
+        b1 = _create_backend("ollama")
+        assert isinstance(b1, OllamaBackend)
+        b2 = _create_backend("anthropic")
+        assert isinstance(b2, AnthropicBackend)
+        b3 = _create_backend("openai")
+        assert isinstance(b3, OpenAIBackend)
+
+    def test_create_backend_known_class_but_unhandled_type(self):
+        """Cover line 701: backend_type in _BACKEND_CLASSES but not in if/elif chain."""
+        # Temporarily add a fake backend type to the class map
+        with patch.dict(audit_backend_mod._BACKEND_CLASSES, {"custom": MagicMock}):
+            result = _create_backend("custom")
+            assert result is None
+
+
+class TestConfiguredBackendOpenCodeEnforcement:
+    """Cover lines 778-779: configured backend unavailable raises in opencode."""
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_configured_unavailable_raises_opencode(self, mock_check):
+        mock_check.return_value = False
+        with patch.dict("os.environ", {
+            "CRUX_AUDIT_BACKEND": "ollama",
+        }, clear=True):
+            with pytest.raises(AuditRequiredError) as exc_info:
+                get_audit_backend(force_refresh=True, context="opencode")
+            assert "not available" in str(exc_info.value).lower()
+
+
+class TestCachedBackendReturn:
+    """Cover line 800: cached backend return path."""
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    def test_cached_backend_returned(self, mock_check):
+        import time
+        mock_check.return_value = True
+
+        # First call populates cache
+        backend1 = get_audit_backend(force_refresh=True)
+        assert isinstance(backend1, OllamaBackend)
+
+        # Second call should return cached (no force_refresh)
+        mock_check.return_value = False  # Would fail if not cached
+        audit_backend_mod._cached_backend_check_time = time.time()  # recent
+        backend2 = get_audit_backend(force_refresh=False)
+        assert isinstance(backend2, OllamaBackend)
+        assert backend2 is backend1
+
+
+class TestGetBackendStatusAuditRequiredError:
+    """Cover lines 929-931: get_backend_status catches AuditRequiredError."""
+
+    @patch("scripts.lib.crux_audit_backend.check_ollama_running")
+    @patch("scripts.lib.crux_audit_backend.detect_context_mode")
+    @patch.object(ClaudeSubagentBackend, "_find_claude_binary")
+    @patch("scripts.lib.crux_audit_backend.get_audit_backend")
+    def test_status_catches_audit_required_error(self, mock_get, mock_find, mock_mode, mock_check):
+        mock_check.return_value = False
+        mock_mode.return_value = "claude-code"
+        mock_find.return_value = None
+        mock_get.side_effect = AuditRequiredError("No backend")
+
+        with patch.dict("os.environ", {}, clear=True):
+            status = get_backend_status()
+            assert status["audit_blocked"] is True
+            assert "BLOCKED" in status["active_backend"]
