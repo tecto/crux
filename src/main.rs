@@ -1,12 +1,16 @@
 pub mod api;
+pub mod bip;
 pub mod cli;
 pub mod context;
 pub mod handlers;
 pub mod hooks;
 pub mod impact;
 pub mod init;
+pub mod knowledge;
 pub mod memory;
+pub mod models;
 pub mod paths;
+pub mod processors;
 pub mod recipes;
 pub mod recover;
 pub mod registry;
