@@ -6,6 +6,7 @@ pub mod init;
 pub mod memory;
 pub mod paths;
 pub mod recipes;
+pub mod recover;
 pub mod registry;
 pub mod safety;
 pub mod security;

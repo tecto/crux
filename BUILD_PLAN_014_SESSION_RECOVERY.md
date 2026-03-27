@@ -1,7 +1,7 @@
 # BUILD_PLAN_014: Session Recovery — Adopt Corrupted Claude Code Sessions
 
 **Created:** 2026-03-27
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 **Goal:** When a Claude Code session is corrupted (400 tool concurrency error, unrecoverable), Crux can ingest the session's .jsonl file directly from disk, extract all useful context (decisions, files touched, working_on, corrections, knowledge), and make it available via `restore_context` in a new session. No running Claude Code instance needed.
 
 **Constraint:** Works entirely from the .jsonl file on disk — no API calls, no running Claude Code.
@@ -49,6 +49,21 @@ Next session:
 - [ ] 1.4 Handle malformed lines gracefully (skip, don't crash)
 - [ ] 1.5 Handle the specific Claude Code message types: `user`, `assistant`, `tool_use`, `tool_result`, `file-history-snapshot`, `agent-name`, `custom-title`, `last-prompt`
 - [ ] 1.6 Tests with fixture .jsonl files (small synthetic ones, not the 72MB real file)
+
+---
+
+## Phase 1B: Full Session Log Ingestion
+
+**Purpose:** Ingest every interaction from the Claude Code session into Crux's analytics format, not just extracted context.
+
+### Checklist — Phase 1B
+
+- [ ] 1B.1 Convert all user messages to `.crux/analytics/conversations/<date>.jsonl` format (role, content, timestamp, tool, mode)
+- [ ] 1B.2 Convert all assistant messages to conversations JSONL
+- [ ] 1B.3 Convert all tool_use/tool_result pairs to `.crux/analytics/interactions/<date>.jsonl` format (tool_name, input, output, timestamp)
+- [ ] 1B.4 Preserve original timestamps from the Claude Code session
+- [ ] 1B.5 Deduplicate: if analytics already has entries for the same timestamps, skip
+- [ ] 1B.6 Tests for full log ingestion
 
 ---
 

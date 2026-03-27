@@ -800,6 +800,45 @@ impl CruxServer {
         })).unwrap_or_default()
     }
 
+    // --- Session Recovery ---
+
+    /// Recover a corrupted Claude Code session from its .jsonl file.
+    #[tool(description = "Recover a corrupted Claude Code session. Ingests the .jsonl file, extracts all context (decisions, files, corrections, full conversation log), and writes to .crux/ for restore_context. Use when a session gets 400 tool concurrency errors.")]
+    async fn recover_session(&self, params: Parameters<QueryParam>) -> String {
+        let path_str = &params.0.query;
+        let session_path = if path_str.is_empty() {
+            // Auto-find most recent session
+            let sessions = crate::recover::find_sessions(&self.project_dir, &self.home_dir);
+            match sessions.first() {
+                Some(p) => p.clone(),
+                None => return r#"{"recovered": false, "error": "No Claude Code sessions found"}"#.into(),
+            }
+        } else {
+            std::path::PathBuf::from(path_str)
+        };
+
+        let recovered = crate::recover::parse_session(&session_path);
+        match crate::recover::write_recovery(&recovered, &self.crux_dir()) {
+            Ok(summary) => {
+                serde_json::to_string(&serde_json::json!({
+                    "recovered": true,
+                    "summary": summary,
+                    "decisions": recovered.key_decisions.len(),
+                    "files": recovered.files_touched.len(),
+                    "corrections": recovered.corrections.len(),
+                    "messages": recovered.messages.len(),
+                    "interactions": recovered.interactions.len(),
+                })).unwrap_or_default()
+            }
+            Err(e) => {
+                serde_json::to_string(&serde_json::json!({
+                    "recovered": false,
+                    "error": e.to_string(),
+                })).unwrap_or_default()
+            }
+        }
+    }
+
     // --- Background Processors ---
 
     /// Check processor thresholds.

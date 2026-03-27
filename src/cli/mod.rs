@@ -45,8 +45,19 @@ enum Commands {
     Version,
     /// Initialize .crux/ in current project
     Init,
+    /// Adopt project into Crux — init + git scan + MCP config + session ingest
+    Adopt {
+        /// Target tool (claude-code, cruxcli, opencode, cursor)
+        #[arg(default_value = "claude-code")]
+        tool: String,
+    },
     /// Show or regenerate handoff context
     Handoff,
+    /// Recover a corrupted Claude Code session
+    Recover {
+        /// Path to .jsonl file, or session ID
+        path: Option<String>,
+    },
     /// Remember a fact
     Remember { fact: String },
     /// Recall memories matching a query
@@ -174,6 +185,110 @@ impl Cli {
             Some(Commands::Handoff) => {
                 let content = session::auto_handoff(&crux);
                 println!("{content}");
+            }
+
+            Some(Commands::Adopt { tool }) => {
+                println!("Adopting project into Crux...\n");
+
+                // Step 1: Init .crux/
+                match crate::init::init_project(&project) {
+                    Ok(created) => {
+                        if created.is_empty() {
+                            println!("  .crux/ already initialized");
+                        } else {
+                            println!("  Created .crux/ ({} dirs)", created.len());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  Init failed: {e}");
+                        return;
+                    }
+                }
+                let _ = crate::init::init_user(&home_root);
+
+                // Step 2: Scan git history
+                let churn = crate::impact::git::churn(&project, 90);
+                let recent_files: Vec<&str> = {
+                    let mut pairs: Vec<(&str, u32)> = churn.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+                    pairs.sort_by(|a, b| b.1.cmp(&a.1));
+                    pairs.into_iter().take(20).map(|(f, _)| f).collect()
+                };
+                println!("  Git history: {} files with recent activity", churn.len());
+
+                // Step 3: Write MCP config for target tool
+                let crux_binary = std::env::current_exe().unwrap_or_default().to_string_lossy().to_string();
+                match crate::sync::generate_mcp_config(&tool, &project, &crux_binary) {
+                    Ok(true) => println!("  MCP config: written for {tool}"),
+                    Ok(false) => eprintln!("  MCP config: unknown tool '{tool}'"),
+                    Err(e) => eprintln!("  MCP config: {e}"),
+                }
+
+                // Step 4: Check for Claude Code sessions to ingest
+                let sessions = crate::recover::find_sessions(&project, &home_root);
+                if !sessions.is_empty() {
+                    println!("  Found {} Claude Code session(s)", sessions.len());
+                    let most_recent = &sessions[0];
+                    let recovered = crate::recover::parse_session(most_recent);
+                    if recovered.parsed_lines > 0 {
+                        match crate::recover::write_recovery(&recovered, &crux) {
+                            Ok(summary) => println!("  Ingested: {summary}"),
+                            Err(e) => eprintln!("  Ingest failed: {e}"),
+                        }
+                    }
+                } else {
+                    // No Claude Code sessions — create initial state from git
+                    let state = session::SessionState {
+                        active_mode: "build-py".into(),
+                        active_tool: tool.clone(),
+                        working_on: String::new(),
+                        files_touched: recent_files.iter().map(|f| f.to_string()).collect(),
+                        ..session::SessionState::new()
+                    };
+                    let _ = session::save_session(&state, &crux);
+                    println!("  Session state: initialized from git history");
+                }
+
+                // Step 5: Import CLAUDE.md if present
+                let claude_md = project.join("CLAUDE.md");
+                if claude_md.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&claude_md) {
+                        let knowledge_dir = crux.join("knowledge");
+                        let _ = std::fs::write(knowledge_dir.join("claude-md-import.md"), &content);
+                        println!("  CLAUDE.md: imported as knowledge entry");
+                    }
+                }
+
+                println!("\nAdoption complete. Start {tool} and call restore_context().");
+            }
+
+            Some(Commands::Recover { path }) => {
+                let session_path = if let Some(p) = path {
+                    std::path::PathBuf::from(p)
+                } else {
+                    // Auto-find most recent session for this project
+                    let sessions = crate::recover::find_sessions(&project, &home_root);
+                    if sessions.is_empty() {
+                        eprintln!("No Claude Code sessions found for this project.");
+                        eprintln!("Usage: crux recover <path-to-session.jsonl>");
+                        return;
+                    }
+                    println!("Found {} session(s). Recovering most recent...", sessions.len());
+                    sessions[0].clone()
+                };
+
+                println!("Parsing: {}", session_path.display());
+                let recovered = crate::recover::parse_session(&session_path);
+                println!("  Parsed {}/{} lines", recovered.parsed_lines, recovered.total_lines);
+                println!("  Messages: {}", recovered.messages.len());
+                println!("  Interactions: {}", recovered.interactions.len());
+                println!("  Decisions: {}", recovered.key_decisions.len());
+                println!("  Files: {}", recovered.files_touched.len());
+                println!("  Corrections: {}", recovered.corrections.len());
+
+                match crate::recover::write_recovery(&recovered, &crux) {
+                    Ok(summary) => println!("\n{summary}"),
+                    Err(e) => eprintln!("Write failed: {e}"),
+                }
             }
 
             Some(Commands::Remember { fact }) => {
