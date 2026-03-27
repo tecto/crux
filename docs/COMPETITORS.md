@@ -1,154 +1,134 @@
 # Crux — Competitive Analysis
 
-The AI coding tools market exceeds $35B with 150M+ developers on GitHub. Every tool traps intelligence in vendor-specific directories. Crux is the only tool-agnostic intelligence layer — .crux/ stores corrections, knowledge, session state, and modes that travel with you across any AI coding tool. We don't compete with these tools; we make all of them better.
+Competitive landscape for Crux in the AI coding intelligence layer category.
 
 ## Official Competitors
 
 ### Cursor
 **URL:** https://cursor.com
 **Category:** official
-**Pricing:** $20/month Pro, $40/month Business
+**Pricing:** $20/mo Pro, $40/mo Business
 
-AI-first code editor built on VS Code with integrated AI coding assistance
+AI-first code editor on VS Code
 
 **Strengths:**
-- Polished IDE experience
+- Polished UX
 - $2B+ ARR
 - Large user base
-- Fast iteration
-- Good UX
 
 **Weaknesses:**
-- Vendor lock-in (.cursor/ directory)
+- Vendor lock-in
 - No cross-tool portability
-- No learning from corrections
-- No safety pipeline
-- Intelligence trapped in their ecosystem
+- No learning
 **Revenue Model:** subscription
 
 ### Claude Code
 **URL:** https://claude.ai/code
 **Category:** official
-**Pricing:** API usage-based ($3-15/MTok)
+**Pricing:** API usage ($3-15/MTok)
 
-Anthropic's CLI agent for coding — hooks system, MCP support, agentic workflows
+Anthropic CLI agent — hooks, MCP, agentic workflows
 
 **Strengths:**
-- Best instruction-following model
-- Hook system enables deep integration
+- Best instruction-following
+- Hook system
 - MCP ecosystem
-- Anthropic backing
-- Opus/Sonnet model quality
+- Opus/Sonnet quality
 
 **Weaknesses:**
 - Intelligence locked in .claude/
+- Expensive API
 - No cross-tool portability
-- No learning from corrections across sessions
-- No safety pipeline beyond model guardrails
-- Expensive API costs
 **Revenue Model:** usage
 
 ### Windsurf
 **URL:** https://windsurf.com
 **Category:** official
-**Pricing:** Free tier, $15/month Pro
+**Pricing:** Free tier, $15/mo Pro
 
-AI-powered IDE (formerly Codeium) with Cascade agent and flows
+AI IDE with Cascade agent and flows
 
 **Strengths:**
 - Good free tier
-- Cascade agent is capable
 - Growing fast
 
 **Weaknesses:**
-- Global-only MCP config
-- No project-level isolation
-- Intelligence locked in platform
-- No cross-tool portability
+- Global-only MCP
+- No portability
 **Revenue Model:** freemium
 
 ### Aider
 **URL:** https://aider.chat
 **Category:** official
-**Pricing:** Free (open source), API costs for models
+**Pricing:** Free (open source)
 
-Open-source AI pair programming in the terminal — repo map, git integration
+Open-source AI pair programming — repo map, git integration
 
 **Strengths:**
 - Open source
 - Excellent repo map
-- Git integration
 - Multi-model
-- Terminal-native
 
 **Weaknesses:**
-- No MCP support
-- No cross-tool portability
-- No learning from corrections
-- No safety pipeline
-- No session state persistence
+- No MCP
+- No portability
+- No learning
+- No safety
 **Revenue Model:** open_source
+
+### Codex CLI
+**URL:** https://github.com/openai/codex
+**Category:** official
+**Pricing:** API usage
+
+OpenAI terminal coding agent — recently rewritten in Rust
+
+**Strengths:**
+- OpenAI backing
+- Rust performance
+- Growing fast
+
+**Weaknesses:**
+- New entrant
+- No learning system
+- No safety pipeline
+- No tool switching
+**Revenue Model:** usage
 
 ## Watch Competitors
 
 ### Copilot
 **URL:** https://github.com/features/copilot
 **Category:** watch
-**Pricing:** $10/month Individual, $19/month Business
+**Pricing:** $10/mo Individual, $19/mo Business
 
-GitHub's AI coding assistant — inline completions, chat, workspace agent
+GitHub AI coding assistant
 
 **Strengths:**
-- Massive distribution (GitHub)
+- Massive distribution
 - Enterprise adoption
-- Multi-IDE
 
 **Weaknesses:**
 - Autocomplete-focused
 - No agentic workflows
-- No learning
-- No safety pipeline
-- Locked to GitHub ecosystem
+- Locked to GitHub
 **Revenue Model:** subscription
 
 ### Replit
 **URL:** https://replit.com
 **Category:** watch
-**Pricing:** $25/month Hacker, custom Enterprise
+**Pricing:** $25/mo Hacker
 
 Cloud IDE and deployment platform with AI agent
 
 **Strengths:**
 - $9B valuation
-- Full platform (IDE + deploy)
-- Mass market reach
+- Full platform
 
 **Weaknesses:**
-- Code quality crisis (2.74x more vulnerabilities)
-- Agent reliability issues
+- Code quality crisis
+- Agent reliability
 - Locked to platform
-- No local development
-- No portability
-**Revenue Model:** subscription
-
-### Lovable
-**URL:** https://lovable.dev
-**Category:** watch
-**Pricing:** $20/month Starter, $50/month Launch
-
-AI-powered full-stack app builder — prompt to deployed app
-
-**Strengths:**
-- $100M ARR in 8 months
-- Fast time-to-app
-- Non-developer friendly
-
-**Weaknesses:**
-- 10% of apps leaked user data
-- No code quality controls
-- No learning
-- Platform lock-in
-- Not for professional developers
 **Revenue Model:** subscription
 
 ### Roo Code
@@ -156,138 +136,134 @@ AI-powered full-stack app builder — prompt to deployed app
 **Category:** watch
 **Pricing:** Free (open source)
 
-AI coding assistant with MCP support — VS Code extension
+VS Code AI assistant with MCP and custom modes
 
 **Strengths:**
-- MCP support
 - Customizable
 - Growing community
 
 **Weaknesses:**
-- Smaller ecosystem
-- No cross-tool portability
-- No learning system
 - VS Code only
+- No portability
+- No learning
 **Revenue Model:** open_source
+
+### Gemini CLI
+**URL:** https://github.com/google/gemini-cli
+**Category:** watch
+**Pricing:** Free (with API key)
+
+Google terminal AI agent
+
+**Strengths:**
+- Google backing
+- Gemini 2.5 model
+
+**Weaknesses:**
+- New entrant
+- Limited ecosystem
+- No learning
+**Revenue Model:** usage
 
 ## Gap Analysis
 
-| Feature | Crux | Aider | Claude Code | Copilot | Cursor | Lovable | Replit | Roo Code | Windsurf |
-|---|---|---|---|---|---|---|---|---|---|
-| .claude/ directory | N | N | Y | N | N | N | N | N | N |
-| .cursor/rules/ for context | N | N | N | N | Y | N | N | N | N |
-| .windsurf/rules/ | N | N | N | N | N | N | N | N | Y |
-| 24 specialized modes | Y | N | N | N | N | N | N | N | N |
-| 43 MCP tools | Y | N | N | N | N | N | N | N | N |
-| 7-gate safety pipeline | Y | N | N | N | N | N | N | N | N |
-| AI agent | N | N | N | N | N | N | Y | N | N |
-| AI code completion | N | N | N | N | Y | N | N | N | N |
-| Agentic coding | N | N | Y | N | N | N | N | N | N |
-| Cascade agent | N | N | N | N | N | N | N | N | Y |
-| Cloud IDE | N | N | N | N | N | N | Y | N | N |
-| GitHub integration | N | N | N | Y | N | N | N | N | N |
-| Inline completions | N | N | N | Y | N | N | N | N | N |
-| MCP server support | N | N | Y | N | N | N | N | N | N |
-| MCP support | N | N | N | N | Y | N | N | Y | Y |
-| Prompt-to-app | N | N | N | N | N | Y | N | N | N |
-| Repo map (AST-based file ranking) | N | Y | N | N | N | N | N | N | N |
-| Supabase integration | N | N | N | N | N | Y | N | N | N |
-| TDD enforcement gate | Y | N | N | N | N | N | N | N | N |
-| VS Code extension | N | N | N | N | N | N | N | Y | N |
-| VS Code/JetBrains integration | N | N | N | Y | N | N | N | N | N |
-| architect mode | N | Y | N | N | N | N | N | N | N |
-| auto-handoff on exit | Y | N | N | N | N | N | N | N | N |
-| background agents | N | N | Y | N | N | N | N | N | N |
-| build-in-public pipeline (Typefully integration) | Y | N | N | N | N | N | N | N | N |
-| chat | N | N | N | Y | N | N | N | N | N |
-| chat with codebase | N | N | N | N | Y | N | N | N | N |
-| codebase awareness | N | N | N | N | N | N | N | N | Y |
-| codebase indexing | N | N | N | N | Y | N | N | N | N |
-| composer mode | N | N | N | N | Y | N | N | N | N |
-| continuous learning from corrections | Y | N | N | N | N | N | N | N | N |
-| correction detection (10 regex patterns) | Y | N | N | N | N | N | N | N | N |
-| cross-project analytics | Y | N | N | N | N | N | N | N | N |
-| custom modes | N | N | N | N | N | N | N | Y | N |
-| daily digest generation | Y | N | N | N | N | N | N | N | N |
-| database | N | N | N | N | N | N | Y | N | N |
-| deployment | N | N | N | N | N | Y | N | N | N |
-| design system | N | N | N | N | N | Y | N | N | N |
-| design validation (WCAG) | Y | N | N | N | N | N | N | N | N |
-| file context management | N | N | N | N | N | N | N | Y | N |
-| flows (multi-step) | N | N | N | N | N | N | N | N | Y |
-| full-stack generation | N | N | N | N | N | Y | N | N | N |
-| git-aware editing | N | Y | N | N | N | N | N | N | N |
-| hooks system (SessionStart, PostToolUse, etc.) | N | N | Y | N | N | N | N | N | N |
-| hosting | N | N | N | N | N | N | Y | N | N |
-| impact analysis (analyze_impact) | Y | N | N | N | N | N | N | N | N |
-| knowledge promotion (project→user→public) | Y | N | N | N | N | N | N | N | N |
-| linting integration | N | Y | N | N | N | N | N | N | N |
-| memory system | N | N | Y | N | N | N | N | N | N |
-| multi-file editing | N | N | N | N | Y | N | N | N | N |
-| multi-model | N | N | N | N | N | N | N | Y | N |
-| multi-model support | N | Y | N | N | N | N | N | N | N |
-| multiplayer editing | N | N | N | N | N | N | Y | N | N |
-| one-click deploy | N | N | N | N | N | N | Y | N | N |
-| per-project MCP isolation | Y | N | N | N | N | N | N | N | N |
-| plan mode | N | N | Y | N | N | N | N | N | N |
-| recursive security audit | Y | N | N | N | N | N | N | N | N |
-| seamless tool switching (crux switch) | Y | N | N | N | N | N | N | N | N |
-| session state portability | Y | N | N | N | N | N | N | N | N |
-| terminal integration | N | N | N | N | Y | N | N | N | Y |
-| tool recipe engine (6 tools) | Y | N | N | N | N | N | N | N | N |
-| tool-agnostic intelligence (.crux/ directory) | Y | N | N | N | N | N | N | N | N |
-| voice coding | N | Y | N | N | N | N | N | N | N |
-| workspace agent | N | N | N | Y | N | N | N | N | N |
-| worktrees | N | N | Y | N | N | N | N | N | N |
+| Feature | Crux | Aider | Claude Code | Codex CLI | Copilot | Cursor | Gemini CLI | Replit | Roo Code | Windsurf |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 24 specialized modes | Y | N | N | N | N | N | N | N | N | N |
+| 57 MCP tools (Rust binary) | Y | N | N | N | N | N | N | N | N | N |
+| 7-gate safety pipeline | Y | N | N | N | N | N | N | N | N | N |
+| Agentic coding | N | N | Y | N | N | N | N | N | N | N |
+| AI agent | N | N | N | N | N | N | N | Y | N | N |
+| AI completion | N | N | N | N | N | Y | N | N | N | N |
+| architect mode | N | Y | N | N | N | N | N | N | N | N |
+| auto-capture session state (hooks) | Y | N | N | N | N | N | N | N | N | N |
+| background agents | N | N | Y | N | N | Y | N | N | N | N |
+| BIP pipeline (Typefully) | Y | N | N | N | N | N | N | N | N | N |
+| Cascade agent | N | N | N | N | N | N | N | N | N | Y |
+| chat | N | N | N | N | Y | N | N | N | N | N |
+| Cloud IDE | N | N | N | N | N | N | N | Y | N | N |
+| codebase awareness | N | N | N | N | N | N | N | N | N | Y |
+| codebase chat | N | N | N | N | N | Y | N | N | N | N |
+| codebase indexing | Y | N | N | N | N | N | N | N | N | N |
+| composer | N | N | N | N | N | Y | N | N | N | N |
+| correction detection (10 patterns) | Y | N | N | N | N | N | N | N | N | N |
+| cross-project analytics | Y | N | N | N | N | N | N | N | N | N |
+| custom modes | N | N | N | N | N | N | N | N | Y | N |
+| database | N | N | N | N | N | N | N | Y | N | N |
+| design validation (WCAG) | Y | N | N | N | N | N | N | N | N | N |
+| extended thinking | N | N | Y | N | N | N | N | N | N | N |
+| file context | N | N | N | N | N | N | N | N | Y | N |
+| flows | N | N | N | N | N | N | N | N | N | Y |
+| Gemini models | N | N | N | N | N | N | Y | N | N | N |
+| git-aware editing | Y | Y | N | N | N | N | N | N | N | N |
+| hooks system | N | N | Y | N | N | N | N | N | N | N |
+| hosting | N | N | N | N | N | N | N | Y | N | N |
+| impact analysis (tree-sitter AST) | Y | N | N | N | N | N | N | N | N | N |
+| indexing | N | N | N | N | N | Y | N | N | N | N |
+| Inline completions | N | N | N | N | Y | N | N | N | N | N |
+| knowledge promotion (project→user→public) | Y | N | N | N | N | N | N | N | N | N |
+| MCP support | N | N | Y | Y | N | Y | N | N | Y | Y |
+| memory system | N | N | Y | N | N | N | N | N | N | N |
+| memory system (remember/recall/forget) | Y | N | N | N | N | N | N | N | N | N |
+| model routing (Ollama/Anthropic/OpenAI) | Y | N | N | N | N | N | N | N | N | N |
+| multi-file edit | N | N | N | N | N | Y | N | N | N | N |
+| multi-IDE | N | N | N | N | Y | N | N | N | N | N |
+| multi-model | N | Y | N | Y | N | N | N | N | Y | N |
+| one-click deploy | N | N | N | N | N | N | N | Y | N | N |
+| plan mode | N | N | Y | N | N | N | N | N | N | N |
+| Repo map (AST) | N | Y | N | N | N | N | N | N | N | N |
+| Rust binary | N | N | N | Y | N | N | N | N | N | N |
+| sandbox | N | N | N | N | N | N | Y | N | N | N |
+| sandbox execution | N | N | N | Y | N | N | N | N | N | N |
+| seamless tool switching (6 tools) | Y | N | N | N | N | N | N | N | N | N |
+| session recovery from corrupted sessions | Y | N | N | N | N | N | N | N | N | N |
+| single binary distribution (zero deps) | Y | N | N | N | N | N | N | N | N | N |
+| Terminal agent | N | N | N | Y | N | N | Y | N | N | N |
+| tool use | N | N | N | N | N | N | Y | N | N | N |
+| tool-agnostic intelligence (.crux/) | Y | N | N | N | N | N | N | N | N | N |
+| voice coding | N | Y | N | N | N | N | N | N | N | N |
+| workspace agent | N | N | N | N | Y | N | N | N | N | N |
+| worktrees | N | N | Y | N | N | N | N | N | N | N |
 
 ### Must-Close
-- **MCP support** — has: Cursor, Windsurf, Roo Code
-- **terminal integration** — has: Cursor, Windsurf
+- **background agents** — has: Claude Code, Cursor
+- **MCP support** — has: Roo Code, Codex CLI, Cursor, Windsurf, Claude Code
+- **multi-model** — has: Roo Code, Aider, Codex CLI
 
 ### Should-Close
-- **.claude/ directory** — has: Claude Code
-- **.cursor/rules/ for context** — has: Cursor
-- **.windsurf/rules/** — has: Windsurf
-- **AI code completion** — has: Cursor
 - **Agentic coding** — has: Claude Code
-- **Cascade agent** — has: Windsurf
-- **MCP server support** — has: Claude Code
-- **Repo map (AST-based file ranking)** — has: Aider
+- **AI completion** — has: Cursor
 - **architect mode** — has: Aider
-- **background agents** — has: Claude Code
-- **chat with codebase** — has: Cursor
+- **Cascade agent** — has: Windsurf
 - **codebase awareness** — has: Windsurf
-- **codebase indexing** — has: Cursor
-- **composer mode** — has: Cursor
-- **flows (multi-step)** — has: Windsurf
-- **git-aware editing** — has: Aider
-- **hooks system (SessionStart, PostToolUse, etc.)** — has: Claude Code
-- **linting integration** — has: Aider
+- **codebase chat** — has: Cursor
+- **composer** — has: Cursor
+- **extended thinking** — has: Claude Code
+- **flows** — has: Windsurf
+- **hooks system** — has: Claude Code
+- **indexing** — has: Cursor
 - **memory system** — has: Claude Code
-- **multi-file editing** — has: Cursor
-- **multi-model support** — has: Aider
+- **multi-file edit** — has: Cursor
 - **plan mode** — has: Claude Code
+- **Repo map (AST)** — has: Aider
+- **Rust binary** — has: Codex CLI
+- **sandbox execution** — has: Codex CLI
+- **Terminal agent** — has: Gemini CLI, Codex CLI
 - **voice coding** — has: Aider
 - **worktrees** — has: Claude Code
 
 ### Nice-To-Have
 - **AI agent** — has: Replit
-- **Cloud IDE** — has: Replit
-- **GitHub integration** — has: Copilot
-- **Inline completions** — has: Copilot
-- **Prompt-to-app** — has: Lovable
-- **Supabase integration** — has: Lovable
-- **VS Code extension** — has: Roo Code
-- **VS Code/JetBrains integration** — has: Copilot
 - **chat** — has: Copilot
+- **Cloud IDE** — has: Replit
 - **custom modes** — has: Roo Code
 - **database** — has: Replit
-- **deployment** — has: Lovable
-- **design system** — has: Lovable
-- **file context management** — has: Roo Code
-- **full-stack generation** — has: Lovable
+- **file context** — has: Roo Code
+- **Gemini models** — has: Gemini CLI
 - **hosting** — has: Replit
-- **multi-model** — has: Roo Code
-- **multiplayer editing** — has: Replit
+- **Inline completions** — has: Copilot
+- **multi-IDE** — has: Copilot
 - **one-click deploy** — has: Replit
+- **sandbox** — has: Gemini CLI
+- **tool use** — has: Gemini CLI
 - **workspace agent** — has: Copilot
