@@ -8,6 +8,24 @@ description: what's new in crux
 
 <div class="changelog">
   <div class="changelog-item">
+    <h2>2026-03-27</h2>
+    <p class="date">complete Rust migration — 57 MCP tools, 6.6MB binary, zero dependencies</p>
+    <ul>
+      <li>entire codebase rewritten from Python to Rust (PLAN-013)</li>
+      <li>57 MCP tools (was 43) — session recovery, codebase indexing, git context, design validation, model routing</li>
+      <li>single binary: 6.6MB, zero runtime dependencies — no Python, no Node.js</li>
+      <li>tree-sitter AST analysis for Python, TypeScript, JavaScript, Rust</li>
+      <li>session recovery: ingest corrupted Claude Code .jsonl sessions (72MB in 0.5s)</li>
+      <li>crux adopt: full project adoption in one command (init + git scan + MCP config + hooks)</li>
+      <li>crux hook: Claude Code hook runner built into the binary</li>
+      <li>session staleness detection: auto-archive stale state, project type detection</li>
+      <li>competitive analysis: 9 competitors tracked, 55 features compared</li>
+      <li>website deployed to runcrux.io</li>
+      <li>all Python/Bash/JavaScript code removed from repo</li>
+    </ul>
+  </div>
+
+  <div class="changelog-item">
     <h2>2026-03-08</h2>
     <p class="date">documentation accuracy, 37 MCP tools, 24 modes, 1290 tests</p>
     <ul>
