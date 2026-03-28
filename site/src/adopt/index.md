@@ -13,10 +13,11 @@ You're 3 hours into a coding session. You've built up context, made decisions, t
 ## The Solution
 
 ```bash
-crux adopt
+crux adopt claude-code
+# or: crux adopt cruxcli, cursor, windsurf, opencode, zed
 ```
 
-Crux captures your existing session and onboards it. No restart needed.
+One command. Crux captures your existing session, sets up MCP, installs hooks, and you're running.
 
 ## What Gets Captured
 
@@ -65,18 +66,10 @@ This becomes your session state, immediately available to any Crux-compatible to
 
 ```json
 {
-  "SessionStart": [{
-    "hooks": [{ "type": "command", "command": "crux session start" }]
-  }],
-  "PostToolUse": [{
-    "hooks": [
-      { "type": "command", "command": "crux detect correction" },
-      { "type": "command", "command": "crux bip check" }
-    ]
-  }],
-  "Stop": [{
-    "hooks": [{ "type": "command", "command": "crux session save" }]
-  }]
+  "SessionStart": [{"hooks": [{"type": "command", "command": "/path/to/crux hook SessionStart"}]}],
+  "PostToolUse": [{"hooks": [{"type": "command", "command": "/path/to/crux hook PostToolUse"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "/path/to/crux hook UserPromptSubmit"}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "/path/to/crux hook Stop"}]}]
 }
 ```
 
@@ -92,26 +85,20 @@ These hooks enable:
 # You've been coding for hours. Want Crux.
 cd /path/to/your/project
 
-# Run adopt
-crux adopt
+# Run adopt (specify your tool)
+crux adopt claude-code
 
 # Output:
-# Initialized .crux/ directories
-# Discovered 87 files from git history
-# Created session state
-# Imported CLAUDE.md
-# Generated PROJECT.md
-# Created .claude/mcp.json
-# Created .claude/settings.local.json (hooks)
-
-# LLM asks: "What are you working on?"
-# You: "Building OAuth2 flow with refresh tokens"
-
-# LLM asks: "Key decisions?"
-# You: "Using python-jose, Redis for session store"
-
-# Done. Session captured. Crux active.
-# Next session picks up with full context.
+# Adopting project into Crux...
+#   Created .crux/ (12 dirs)
+#   Git history: 87 files with recent activity
+#   MCP config: written for claude-code
+#   Found 2 Claude Code session(s)
+#   Ingested: 48 decisions, 249 files, 16 corrections
+#   CLAUDE.md: imported as knowledge entry
+#   Claude Code hooks: written to .claude/settings.local.json
+#
+# Adoption complete. Start claude-code and call restore_context().
 ```
 
 ## When to Use adopt vs switch

@@ -1,7 +1,7 @@
 # BUILD_PLAN_025: Website Content Refresh — Match Rust Binary Reality
 
 **Created:** 2026-03-27
-**Status:** ESCALATED
+**Status:** COMPLETE
 **Goal:** Update all runcrux.io pages to reflect the Rust binary reality: 57 MCP tools, single binary, zero runtime dependencies, session recovery, new architecture. Remove all Python/setup.sh references.
 
 **Constraint:** Content only — no design changes, no new pages.
@@ -38,14 +38,14 @@
 ## Phase 3: Tool-Specific Docs
 
 - [x] 3.1 Updated docs/claude-code/index.md: 43→57 tools
-- [ ] 3.2 docs/opencode — deferred (needs CruxCLI-specific rewrite)
-- [ ] 3.3 Other tool docs — deferred (content review)
+- [x] 3.2 Rewrote docs/opencode as CruxCLI/OpenCode page with Rust binary config
+- [x] 3.3 All other tool docs verified clean (no outdated refs)
 
 ## Phase 4: About + Changelog
 
-- [ ] 4.1 docs/about — deferred
+- [x] 4.1 Updated about page: 37→57 tools, Rust binary, added tool reference link
 - [x] 4.2 Updated changelog/index.njk: added Rust migration entry (2026-03-27)
-- [ ] 4.3 docs/adopt — deferred
+- [x] 4.3 Updated adopt page: crux adopt claude-code command, Rust hook config, real output example
 
 ## Phase 5: Build + Deploy
 
@@ -56,9 +56,9 @@
 
 ## Phase 6: Add Comparison Pages
 
-- [ ] 6.1 Comparison pages — deferred (docs/vs/ exists but not added to site yet)
-- [ ] 6.2 Landing page link — deferred
-- [ ] 6.3 Build and deploy — deferred
+- [x] 6.1 Created site/src/vs/ with 9 comparison pages + index
+- [x] 6.2 Added "compare with competitors" link on landing page
+- [x] 6.3 Built (51 pages) and deployed. /vs/ and /vs/cursor/ verified live.
 
 ---
 

@@ -30,7 +30,7 @@ Your corrections, your knowledge, your session state — all stored in `.crux/`.
   context/                  # Project context (auto-generated)
 ```
 
-The Crux MCP server exposes 37 tools that any compatible AI assistant can use. One server, all logic, every tool connects.
+The Crux MCP server is a single 6.6MB Rust binary exposing 57 tools via the Model Context Protocol. Zero runtime dependencies. One binary, every tool connects.
 
 ## The Philosophy
 
@@ -48,6 +48,8 @@ The project is open source. The code is the documentation.
 
 ## What's Next
 
-- [Get started](/docs/) — Install Crux in 30 seconds
+- [Get started](/docs/) — Download a single binary, adopt your project
+- [See the 57 tools](/docs/mcp-server/) — Complete MCP tool reference
 - [See the modes](/modes/) — 24 specialized modes for different work
 - [Read the blog](/blog/) — Build-in-public updates
+- [View on GitHub](https://github.com/trinsiklabs/crux) — MIT licensed, open source
